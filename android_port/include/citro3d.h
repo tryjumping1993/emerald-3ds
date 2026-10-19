@@ -68,6 +68,7 @@ typedef struct
     u8 *dirtyTiles;            /* a bit per 8x8 tile the compositor has written since the last upload */
     bool touched;
     u32 param;                 /* the PICA's texture mode bits (GPU_TEXTURE_MODE); only the voxel world sets it */
+    u8 gpuScale;               /* a render target's texture holds this many times its width and height (0 or 1: as asked) */
     u32 scanned;               /* the frame whose texels were last compared with what the GL holds (see TexReady) */
     bool lazy;                 /* made by the first draw over memory the voxel world carved out, written through copies and flushes only */
 } C3D_Tex;
@@ -91,6 +92,7 @@ typedef struct C3D_RenderTarget_tag
     gfxScreen_t screenId;
     gfx3dSide_t side;
     u32 glFramebuffer, glDepth;
+    u32 glScale;                /* GL pixels per scene unit, along each axis */
     C3D_Tex *tex;
 } C3D_RenderTarget;
 
@@ -148,6 +150,9 @@ float C3D_GetCmdBufUsage(void);
 /* ── Textures ────────────────────────────────────────────────────────────── */
 bool C3D_TexInit(C3D_Tex *tex, u16 width, u16 height, GPU_TEXCOLOR format);
 bool C3D_TexInitVRAM(C3D_Tex *tex, u16 width, u16 height, GPU_TEXCOLOR format);
+/* A texture the GPU draws into at `scale` times the resolution: the scene (a target's width and height, what
+ * the compositor's coordinates and scissors mean) and the UVs it is drawn with stay those of the logical size. */
+bool C3D_TexInitVRAMScaled(C3D_Tex *tex, u16 width, u16 height, GPU_TEXCOLOR format, unsigned scale);
 void C3D_TexDelete(C3D_Tex *tex);
 void C3D_TexBind(int unit, C3D_Tex *tex);
 void C3D_TexFlush(C3D_Tex *tex);

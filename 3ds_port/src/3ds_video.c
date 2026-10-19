@@ -6499,7 +6499,19 @@ bool CtrVideo_Init(void)
     /* Citro3D rejects render-to-texture targets outside VRAM. The atlas is
      * CPU-updated linear memory, but the GPU-written surface MUST be VRAM. */
     step = "logical surface in VRAM";
+#ifdef PLATFORM_ANDROID
+    /* The logical picture is drawn at several times its size (the compositor's coordinates, scissors and UVs
+     * stay those of 512x256): the voxel world's edges are as sharp as the panel allows, and the 2D screens
+     * are the same picture at an integer scale. settings.txt: surface_scale=1..4. */
+    {
+        int scale = CtrSettings_GetInt("surface_scale", 4);
+
+        if (scale < 1 || scale > 4) scale = 4;
+        if (!C3D_TexInitVRAMScaled(&sSurface, 512, 256, GPU_RGBA8, (unsigned)scale)) goto fail;
+    }
+#else
     if (!C3D_TexInitVRAM(&sSurface, 512, 256, GPU_RGBA8)) goto fail;
+#endif
     C3D_TexSetFilter(&sAtlas, GPU_NEAREST, GPU_NEAREST);
     C3D_TexSetFilter(&sSurface, GPU_NEAREST, GPU_NEAREST);
     C3D_TexSetWrap(&sAtlas, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);

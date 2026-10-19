@@ -499,7 +499,7 @@ static void TexApplyParams(C3D_Tex *tex)
 /* A texture only the GPU holds still has a data pointer, as in VRAM: the compositor tests it to know the texture exists. */
 static char sGpuMarker;
 
-static bool TexCreate(C3D_Tex *tex, u16 width, u16 height, GPU_TEXCOLOR format, bool withMemory)
+static bool TexCreate(C3D_Tex *tex, u16 width, u16 height, GPU_TEXCOLOR format, bool withMemory, unsigned scale)
 {
     TexFormat f = FormatOf(format);
     GLuint name = 0;
@@ -521,7 +521,8 @@ static bool TexCreate(C3D_Tex *tex, u16 width, u16 height, GPU_TEXCOLOR format, 
     glGenTextures(1, &name);
     tex->glTexture = name;
     glBindTexture(GL_TEXTURE_2D, name);
-    glTexStorage2D(GL_TEXTURE_2D, 1, f.internal, width, height);
+    tex->gpuScale = (u8)(scale > 1 ? scale : 1);
+    glTexStorage2D(GL_TEXTURE_2D, 1, f.internal, width * tex->gpuScale, height * tex->gpuScale);
     tex->filterMag = tex->filterMin = GPU_NEAREST;
     tex->wrapS = tex->wrapT = GPU_CLAMP_TO_EDGE;
     TexApplyParams(tex);
@@ -533,12 +534,17 @@ static bool TexCreate(C3D_Tex *tex, u16 width, u16 height, GPU_TEXCOLOR format, 
 
 bool C3D_TexInit(C3D_Tex *tex, u16 width, u16 height, GPU_TEXCOLOR format)
 {
-    return TexCreate(tex, width, height, format, true);
+    return TexCreate(tex, width, height, format, true, 1);
 }
 
 bool C3D_TexInitVRAM(C3D_Tex *tex, u16 width, u16 height, GPU_TEXCOLOR format)
 {
-    return TexCreate(tex, width, height, format, false);
+    return TexCreate(tex, width, height, format, false, 1);
+}
+
+bool C3D_TexInitVRAMScaled(C3D_Tex *tex, u16 width, u16 height, GPU_TEXCOLOR format, unsigned scale)
+{
+    return TexCreate(tex, width, height, format, false, scale);
 }
 
 static void FreeShadow(C3D_Tex *tex);
@@ -758,6 +764,7 @@ static C3D_RenderTarget *TargetMake(int width, int height, C3D_Tex *tex, GPU_DEP
         return NULL;
     target->frameBuf.width = (u16)width;
     target->frameBuf.height = (u16)height;
+    target->glScale = tex->gpuScale > 1 ? tex->gpuScale : 1;
     target->frameBuf.colorFmt = colorFmt;
     target->frameBuf.depthFmt = depthFmt;
     target->tex = tex;
@@ -768,7 +775,8 @@ static C3D_RenderTarget *TargetMake(int width, int height, C3D_Tex *tex, GPU_DEP
     {
         glGenRenderbuffers(1, &target->glDepth);
         glBindRenderbuffer(GL_RENDERBUFFER, target->glDepth);
-        glRenderbufferStorage(GL_RENDERBUFFER, depthFmt == GPU_RB_DEPTH16 ? GL_DEPTH_COMPONENT16 : GL_DEPTH_COMPONENT24, width, height);
+        glRenderbufferStorage(GL_RENDERBUFFER, depthFmt == GPU_RB_DEPTH16 ? GL_DEPTH_COMPONENT16 : GL_DEPTH_COMPONENT24,
+                              width * (int)target->glScale, height * (int)target->glScale);
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, target->glDepth);
     }
     status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
@@ -811,7 +819,7 @@ C3D_RenderTarget *C3D_RenderTargetCreate(int width, int height, GPU_COLORBUF col
     C3D_Tex *tex = malloc(sizeof(*tex));
     C3D_RenderTarget *target;
 
-    if (tex == NULL || !TexCreate(tex, (u16)width, (u16)height, texFmt, false))
+    if (tex == NULL || !TexCreate(tex, (u16)width, (u16)height, texFmt, false, 1))
     {
         free(tex);
         return NULL;
@@ -1111,8 +1119,8 @@ static void ApplyTarget(void)
     else if (target != NULL)
     {
         glBindFramebuffer(GL_FRAMEBUFFER, target->glFramebuffer);
-        G.viewportW = target->frameBuf.width;
-        G.viewportH = target->frameBuf.height;
+        G.viewportW = target->frameBuf.width * target->glScale;
+        G.viewportH = target->frameBuf.height * target->glScale;
     }
     glViewport(0, 0, G.viewportW, G.viewportH);
 }
@@ -1403,7 +1411,7 @@ static void DumpAll(void)
         if (target != NULL && target->tex != NULL)
         {
             snprintf(name, sizeof(name), "target%02d", i);
-            DumpFramebuffer(target->glFramebuffer, target->frameBuf.width, target->frameBuf.height, name);
+            DumpFramebuffer(target->glFramebuffer, target->frameBuf.width * target->glScale, target->frameBuf.height * target->glScale, name);
         }
     }
     for (int i = 0; i < REGISTRY; ++i)
@@ -1415,7 +1423,7 @@ static void DumpAll(void)
             glBindFramebuffer(GL_FRAMEBUFFER, G.blitFbo);
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex->glTexture, 0);
             snprintf(name, sizeof(name), "texture%02d", i);
-            DumpFramebuffer(G.blitFbo, tex->width, tex->height, name);
+            DumpFramebuffer(G.blitFbo, tex->width * (tex->gpuScale > 1 ? tex->gpuScale : 1), tex->height * (tex->gpuScale > 1 ? tex->gpuScale : 1), name);
         }
     }
     CtrLog_Write(CTR_LOG_VIDEO, "c3d: dumped the surfaces");
