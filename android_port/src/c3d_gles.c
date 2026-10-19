@@ -104,6 +104,14 @@ static struct
 
 static void FlushBatch(void);
 static bool BuildVoxelProgram(void);
+static void RecordBatch(void);
+static void RecordRaw(const u8 *vertices, size_t vertexBytes, const void *indices, int count, int type);
+static void RecordClear(C3D_RenderTarget *target, u8 bits, u32 color, u32 depth);
+static void ReplayFrameBegin(void);
+static void ReplayFrameEnd(void);
+static void DrawBatchNow(const BatchVertex *vertices, unsigned quads);
+static void DrawRawNow(const u8 *vertices, size_t vertexBytes, const void *indices, int count, int type);
+static void ShowTop(void);
 
 static C3D_Tex *sTextures[REGISTRY];
 static C3D_RenderTarget *sTargets[REGISTRY];
@@ -832,6 +840,7 @@ C3D_RenderTarget *C3D_RenderTargetCreate(int width, int height, GPU_COLORBUF col
         free(tex);
         return NULL;
     }
+    target->bottom = colorFmt == GPU_RB_RGB565;
     /* This target owns the texture it draws into: C3D_RenderTargetDelete frees it. */
     target->screenId = (gfxScreen_t)-1;
     return target;
@@ -1252,6 +1261,24 @@ static void TraceBatch(void)
                  G.env[0].srcRgb, G.env[0].srcAlpha, G.env[0].funcRgb, (int)G.alphaTest);
 }
 
+static void DrawBatchNow(const BatchVertex *vertices, unsigned quads)
+{
+    ApplyState();
+    glBindVertexArray(G.vao);
+    glBindBuffer(GL_ARRAY_BUFFER, G.vbo);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(quads * 4 * sizeof(BatchVertex)), vertices, GL_STREAM_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), (void *)offsetof(BatchVertex, x));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), (void *)offsetof(BatchVertex, u));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), (void *)offsetof(BatchVertex, blendTexture));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(BatchVertex), (void *)offsetof(BatchVertex, color));
+    glDrawElements(GL_TRIANGLES, (GLsizei)(quads * 6), GL_UNSIGNED_SHORT, 0);
+    CheckError(G.mode == MODE_IMAGE ? "image batch" : "solid batch");
+}
+
 static void FlushBatch(void)
 {
     if (G.quads == 0)
@@ -1259,20 +1286,8 @@ static void FlushBatch(void)
     TraceBatch();
     if (!G.skip && G.target != NULL)
     {
-        ApplyState();
-        glBindVertexArray(G.vao);
-        glBindBuffer(GL_ARRAY_BUFFER, G.vbo);
-        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(G.quads * 4 * sizeof(BatchVertex)), G.vertices, GL_STREAM_DRAW);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), (void *)offsetof(BatchVertex, x));
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), (void *)offsetof(BatchVertex, u));
-        glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(BatchVertex), (void *)offsetof(BatchVertex, blendTexture));
-        glEnableVertexAttribArray(3);
-        glVertexAttribPointer(3, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(BatchVertex), (void *)offsetof(BatchVertex, color));
-        glDrawElements(GL_TRIANGLES, (GLsizei)(G.quads * 6), GL_UNSIGNED_SHORT, 0);
-        CheckError(G.mode == MODE_IMAGE ? "image batch" : "solid batch");
+        RecordBatch();
+        DrawBatchNow(G.vertices, G.quads);
         CountDraw(G.target, false, G.quads);
     }
     /* What Citro2D last drew with stays bound for the raw draws that follow: the compositor sends a
@@ -1326,6 +1341,7 @@ bool C3D_FrameBegin(u8 flags)
     G.inFrame = true;
     G.quads = 0;
     ++G.frameNo;
+    ReplayFrameBegin();
     return true;
 }
 
@@ -1484,6 +1500,7 @@ void C3D_FrameEnd(u8 flags)
             memset(sRawCount, 0, sizeof(sRawCount));
         }
     }
+    ReplayFrameEnd();
     ShowTop();
     G.inFrame = false;
     G.target = NULL;
@@ -1531,6 +1548,7 @@ void C3D_RenderTargetClear(C3D_RenderTarget *target, u8 clearBits, u32 clearColo
         if (surfaceW <= 0 || !TopEnsure(surfaceW, surfaceH))
             return;
     }
+    RecordClear(target, clearBits, clearColor, clearDepth);
     G.target = target;
     ApplyTarget();
     glDisable(GL_SCISSOR_TEST);
@@ -1748,8 +1766,7 @@ void C3D_FixedAttribSet(int id, float x, float y, float z, float w)
 
 void C3D_DrawElements(GPU_Primitive_t primitive, int count, int type, const void *indices)
 {
-    unsigned maxIndex = 0, offset = 0;
-    size_t indexBytes = type == C3D_UNSIGNED_BYTE ? 1 : 2;
+    unsigned maxIndex = 0;
 
     FlushBatch();
     if (G.skip || G.target == NULL || count <= 0 || G.bufInfo.data == NULL || primitive != GPU_TRIANGLES)
@@ -1763,10 +1780,20 @@ void C3D_DrawElements(GPU_Primitive_t primitive, int count, int type, const void
     }
     G.mode = G.env[0].funcRgb == ENV_C2D ? MODE_IMAGE : MODE_RAW;
     G.batchTexture = G.bound;
+    RecordRaw(G.bufInfo.data, (size_t)(maxIndex + 1) * G.bufInfo.stride, indices, count, type);
+    DrawRawNow(G.bufInfo.data, (size_t)(maxIndex + 1) * G.bufInfo.stride, indices, count, type);
+    CountDraw(G.target, true, (unsigned)count / 6);
+}
+
+static void DrawRawNow(const u8 *vertices, size_t vertexBytes, const void *indices, int count, int type)
+{
+    unsigned offset = 0;
+    size_t indexBytes = type == C3D_UNSIGNED_BYTE ? 1 : 2;
+
     ApplyState();
     glBindVertexArray(G.vao);
     glBindBuffer(GL_ARRAY_BUFFER, G.rawVbo);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)((maxIndex + 1) * G.bufInfo.stride), G.bufInfo.data, GL_STREAM_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)vertexBytes, vertices, GL_STREAM_DRAW);
     for (int a = 0; a < 4; ++a)
         glDisableVertexAttribArray(a);
     for (unsigned i = 0; i < G.attrInfo.loaders; ++i)
@@ -1788,7 +1815,6 @@ void C3D_DrawElements(GPU_Primitive_t primitive, int count, int type, const void
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(count * indexBytes), indices, GL_STREAM_DRAW);
     glDrawElements(GL_TRIANGLES, count, type == C3D_UNSIGNED_BYTE ? GL_UNSIGNED_BYTE : GL_UNSIGNED_SHORT, 0);
     CheckError("raw draw");
-    CountDraw(G.target, true, (unsigned)count / 6);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, G.ibo);
     G.mode = MODE_IMAGE;
 }
@@ -1922,125 +1948,258 @@ static const char kVoxelVertexShader[] =
     "    vColor = clamp(vec4(tint, 1.0 - haze), 0.0, 1.0);\n"
     "}\n";
 
-static const char kVoxelFragmentHead[] =
-    "#version 300 es\n"
-    "precision highp float;\n"
-    "uniform sampler2D uTex0;\n"
-    "uniform sampler2D uTex1;\n"
-    "uniform sampler2D uTex2;\n"
-    "uniform int uStages;\n"
-    "uniform ivec4 uSrc[6];\n"
-    "uniform ivec4 uSrcA[6];\n"
-    "uniform ivec4 uOp[6];\n"
-    "uniform ivec4 uOpA[6];\n"
-    "uniform vec4 uConst[6];\n"
-    "uniform int uAlphaFunc;\n"
-    "uniform float uAlphaRef;\n"
-    "in vec2 vTc0;\n"
-    "in vec2 vTc1;\n"
-    "in vec2 vTc2;\n"
-    "in vec4 vColor;\n"
-    "out vec4 fragColor;\n"
-    "vec4 source(int s, vec4 prev, vec4 t0, vec4 t1, vec4 t2, vec4 cst) {\n"
-    "    if (s == 3) return t0;\n"
-    "    if (s == 4) return t1;\n"
-    "    if (s == 5) return t2;\n"
-    "    if (s == 14) return cst;\n"
-    "    if (s == 15) return prev;\n"
-    "    return vColor;\n"
-    "}\n";
+/*
+ * The fragment stage is generated from the texture environment (a PICA draw's six stages): every stage's
+ * sources, operands, function and scale are written into the shader as constants, so a draw runs only what
+ * its environment says, not the compositor's general loop. One program per distinct environment (and alpha
+ * test), made when first drawn with and kept; the vertex shader is shared.
+ */
+typedef struct
+{
+    u32 stages, alphaFunc;
+    struct { u32 srcRgb, srcAlpha, opRgb, opAlpha; u16 funcRgb, funcAlpha, scaleRgb, scaleAlpha; } s[6];
+} VoxKey;
 
-static const char kVoxelFragmentMain[] =
-    "void main() {\n"
-    "    vec4 t0 = texture(uTex0, vTc0);\n"
-    "    vec4 t1 = texture(uTex1, vTc1);\n"
-    "    vec4 t2 = texture(uTex2, vTc2);\n"
-    "    vec4 prev = vColor;\n"
-    "    for (int i = 0; i < uStages; ++i) {\n"
-    "        vec4 cst = uConst[i];\n"
-    "        vec3 a = operandRgb(uOp[i].x, source(uSrc[i].x, prev, t0, t1, t2, cst));\n"
-    "        vec3 b = operandRgb(uOp[i].y, source(uSrc[i].y, prev, t0, t1, t2, cst));\n"
-    "        vec3 c = operandRgb(uOp[i].z, source(uSrc[i].z, prev, t0, t1, t2, cst));\n"
-    "        float aa = operandA(uOpA[i].x, source(uSrcA[i].x, prev, t0, t1, t2, cst));\n"
-    "        float ab = operandA(uOpA[i].y, source(uSrcA[i].y, prev, t0, t1, t2, cst));\n"
-    "        float ac = operandA(uOpA[i].z, source(uSrcA[i].z, prev, t0, t1, t2, cst));\n"
-    "        vec3 rgb = clamp(combine(uSrc[i].w, a, b, c) * float(uOp[i].w), 0.0, 1.0);\n"
-    "        float alpha = clamp(combineA(uSrcA[i].w, aa, ab, ac) * float(uOpA[i].w), 0.0, 1.0);\n"
-    "        if (uSrc[i].w == 7) alpha = rgb.r;\n"
-    "        prev = vec4(rgb, alpha);\n"
-    "    }\n"
-    "    if (uAlphaFunc != 1) {\n"
-    "        float ref = uAlphaRef;\n"
-    "        float al = floor(prev.a * 255.0 + 0.5) / 255.0;\n"
-    "        bool pass = uAlphaFunc == 0 ? false\n"
-    "                  : uAlphaFunc == 2 ? al == ref\n"
-    "                  : uAlphaFunc == 3 ? al != ref\n"
-    "                  : uAlphaFunc == 4 ? al < ref\n"
-    "                  : uAlphaFunc == 5 ? al <= ref\n"
-    "                  : uAlphaFunc == 6 ? al > ref : al >= ref;\n"
-    "        if (!pass) discard;\n"
-    "    }\n"
-    "    fragColor = prev;\n"
-    "}\n";
+typedef struct
+{
+    VoxKey key;
+    GLuint program;
+    GLint reg, depth, constants, alphaRef;
+    float appliedReg[14][4], appliedConst[24], appliedDepth[2], appliedRef;
+    bool applied;
+} VoxVariant;
 
-/* The fragment stage shares the compositor's texture environment functions: they are cut out of its
- * source (from operandRgb to main) and put between the voxel program's own head and main. */
+#define VOX_VARIANTS 128
+static VoxVariant sVox[VOX_VARIANTS];
+static unsigned sVoxCount;
+static GLuint sVoxVs;
+
 static bool BuildVoxelProgram(void)
 {
-    const char *functions = strstr(kFragmentShader, "vec3 operandRgb("), *mainStart = strstr(kFragmentShader, "void main()");
-    char *fragment;
-    GLuint vs, fs;
-    GLint ok = 0;
-
-    if (functions == NULL || mainStart == NULL || mainStart < functions)
+    sVoxVs = Compile(GL_VERTEX_SHADER, kVoxelVertexShader);
+    if (sVoxVs == 0)
         return false;
-    fragment = malloc(sizeof(kVoxelFragmentHead) + (size_t)(mainStart - functions) + sizeof(kVoxelFragmentMain));
-    if (fragment == NULL)
-        return false;
-    strcpy(fragment, kVoxelFragmentHead);
-    strncat(fragment, functions, (size_t)(mainStart - functions));
-    strcat(fragment, kVoxelFragmentMain);
-    vs = Compile(GL_VERTEX_SHADER, kVoxelVertexShader);
-    fs = Compile(GL_FRAGMENT_SHADER, fragment);
-    free(fragment);
-    if (vs == 0 || fs == 0)
-        return false;
-    G.voxProgram = glCreateProgram();
-    glAttachShader(G.voxProgram, vs);
-    glAttachShader(G.voxProgram, fs);
-    glLinkProgram(G.voxProgram);
-    glDeleteShader(vs);
-    glDeleteShader(fs);
-    glGetProgramiv(G.voxProgram, GL_LINK_STATUS, &ok);
-    if (!ok)
-    {
-        char log[1024];
-
-        glGetProgramInfoLog(G.voxProgram, sizeof(log), NULL, log);
-        CtrLog_Write(CTR_LOG_ERROR, "c3d: voxel program link failed: %s", log);
-        glDeleteProgram(G.voxProgram);
-        G.voxProgram = 0;
-        return false;
-    }
-    G.voxReg = glGetUniformLocation(G.voxProgram, "uReg");
-    G.voxDepth = glGetUniformLocation(G.voxProgram, "uDepth");
-    G.voxTex[0] = glGetUniformLocation(G.voxProgram, "uTex0");
-    G.voxTex[1] = glGetUniformLocation(G.voxProgram, "uTex1");
-    G.voxTex[2] = glGetUniformLocation(G.voxProgram, "uTex2");
-    G.voxStages = glGetUniformLocation(G.voxProgram, "uStages");
-    G.voxSrc = glGetUniformLocation(G.voxProgram, "uSrc");
-    G.voxSrcA = glGetUniformLocation(G.voxProgram, "uSrcA");
-    G.voxOp = glGetUniformLocation(G.voxProgram, "uOp");
-    G.voxOpA = glGetUniformLocation(G.voxProgram, "uOpA");
-    G.voxConst = glGetUniformLocation(G.voxProgram, "uConst");
-    G.voxAlphaFunc = glGetUniformLocation(G.voxProgram, "uAlphaFunc");
-    G.voxAlphaRef = glGetUniformLocation(G.voxProgram, "uAlphaRef");
+    G.voxProgram = 1; /* the world can be drawn */
     glGenVertexArrays(1, &G.voxVao);
     glGenBuffers(1, &G.voxStream);
     G.depthScale = -1.0f;
     G.depthOffset = 0.0f;
-    CtrLog_Write(CTR_LOG_VIDEO, "c3d: voxel program ready");
+    CtrLog_Write(CTR_LOG_VIDEO, "c3d: voxel vertex shader ready");
     return true;
+}
+
+static const char *VoxSource(char *out, size_t size, int source, int stage)
+{
+    switch (source)
+    {
+    case GPU_TEXTURE0: return "t0";
+    case GPU_TEXTURE1: return "t1";
+    case GPU_TEXTURE2: return "t2";
+    case GPU_CONSTANT: snprintf(out, size, "uConst[%d]", stage); return out;
+    case GPU_PREVIOUS: return "prev";
+    default: return "vColor";
+    }
+}
+
+static void VoxOperandRgb(char *out, size_t size, int op, const char *v)
+{
+    switch (op)
+    {
+    case 1: snprintf(out, size, "(1.0 - (%s).rgb)", v); break;
+    case 2: snprintf(out, size, "vec3((%s).a)", v); break;
+    case 3: snprintf(out, size, "vec3(1.0 - (%s).a)", v); break;
+    case 4: snprintf(out, size, "vec3((%s).r)", v); break;
+    case 5: snprintf(out, size, "vec3(1.0 - (%s).r)", v); break;
+    case 8: snprintf(out, size, "vec3((%s).g)", v); break;
+    case 9: snprintf(out, size, "vec3(1.0 - (%s).g)", v); break;
+    case 12: snprintf(out, size, "vec3((%s).b)", v); break;
+    case 13: snprintf(out, size, "vec3(1.0 - (%s).b)", v); break;
+    default: snprintf(out, size, "(%s).rgb", v); break;
+    }
+}
+
+static void VoxOperandA(char *out, size_t size, int op, const char *v)
+{
+    static const char *const channel[4] = { "a", "r", "g", "b" };
+
+    if (op >= 0 && op < 8)
+        snprintf(out, size, op & 1 ? "(1.0 - (%s).%s)" : "(%s).%s", v, channel[op >> 1]);
+    else
+        snprintf(out, size, "(%s).a", v);
+}
+
+static size_t VoxGenerate(const VoxKey *key, char *out, size_t size)
+{
+    static const char *const scales[3] = { "1.0", "2.0", "4.0" };
+    bool uses[3] = { false, false, false };
+    size_t n = 0;
+
+    for (unsigned i = 0; i < key->stages; ++i)
+        for (int k = 0; k < 3; ++k)
+        {
+            int rgb = (int)((key->s[i].srcRgb >> (4 * k)) & 15), alpha = (int)((key->s[i].srcAlpha >> (4 * k)) & 15);
+
+            if (rgb >= GPU_TEXTURE0 && rgb <= GPU_TEXTURE2)
+                uses[rgb - GPU_TEXTURE0] = true;
+            if (alpha >= GPU_TEXTURE0 && alpha <= GPU_TEXTURE2)
+                uses[alpha - GPU_TEXTURE0] = true;
+        }
+#define EMIT(...) n += (size_t)snprintf(out + n, n < size ? size - n : 0, __VA_ARGS__)
+    EMIT("#version 300 es\nprecision highp float;\n");
+    for (int k = 0; k < 3; ++k)
+        if (uses[k])
+            EMIT("uniform sampler2D uTex%d;\n", k);
+    EMIT("uniform vec4 uConst[6];\nuniform float uAlphaRef;\nin vec2 vTc0;\nin vec2 vTc1;\nin vec2 vTc2;\nin vec4 vColor;\nout vec4 fragColor;\n");
+    EMIT("void main() {\n");
+    for (int k = 0; k < 3; ++k)
+        if (uses[k])
+            EMIT("    vec4 t%d = texture(uTex%d, vTc%d);\n", k, k, k);
+    EMIT("    vec4 prev = vColor;\n");
+    for (unsigned i = 0; i < key->stages; ++i)
+    {
+        char buffer[3][40], operand[3][96], operandA[3][96];
+        int func = key->s[i].funcRgb, funcA = key->s[i].funcAlpha;
+        u32 srcRgb = key->s[i].srcRgb, srcAlpha = key->s[i].srcAlpha, opRgb = key->s[i].opRgb, opAlpha = key->s[i].opAlpha;
+        const char *combine, *combineA;
+        char combineText[160], combineAText[160];
+
+        for (int k = 0; k < 3; ++k)
+        {
+            const char *source = VoxSource(buffer[k], sizeof(buffer[k]), (int)((srcRgb >> (4 * k)) & 15), (int)i);
+            const char *sourceA = VoxSource(buffer[k], sizeof(buffer[k]), (int)((srcAlpha >> (4 * k)) & 15), (int)i);
+
+            VoxOperandRgb(operand[k], sizeof(operand[k]), (int)((opRgb >> (4 * k)) & 15), source);
+            VoxOperandA(operandA[k], sizeof(operandA[k]), (int)((opAlpha >> (4 * k)) & 15), sourceA);
+        }
+        switch (func)
+        {
+        case 0: combine = "a"; break;
+        case 1: combine = "a * b"; break;
+        case 2: combine = "a + b"; break;
+        case 3: combine = "a + b - 0.5"; break;
+        case 4: combine = "a * c + b * (1.0 - c)"; break;
+        case 5: combine = "a - b"; break;
+        case 6: case 7: combine = "vec3(4.0 * dot(a - 0.5, b - 0.5))"; break;
+        case 8: combine = "a * b + c"; break;
+        default: combine = "(a + b) * c"; break;
+        }
+        switch (funcA)
+        {
+        case 1: combineA = "aa * ab"; break;
+        case 2: combineA = "aa + ab"; break;
+        case 3: combineA = "aa + ab - 0.5"; break;
+        case 4: combineA = "aa * ac + ab * (1.0 - ac)"; break;
+        case 5: combineA = "aa - ab"; break;
+        case 8: combineA = "aa * ab + ac"; break;
+        case 9: combineA = "(aa + ab) * ac"; break;
+        default: combineA = "aa"; break;
+        }
+        snprintf(combineText, sizeof(combineText), "%s", combine);
+        snprintf(combineAText, sizeof(combineAText), "%s", combineA);
+        EMIT("    {\n        vec3 a = %s, b = %s, c = %s;\n        float aa = %s, ab = %s, ac = %s;\n", operand[0], operand[1], operand[2],
+             operandA[0], operandA[1], operandA[2]);
+        EMIT("        vec3 rgb = clamp((%s) * %s, 0.0, 1.0);\n        float alpha = clamp((%s) * %s, 0.0, 1.0);\n", combineText,
+             scales[key->s[i].scaleRgb > 2 ? 2 : key->s[i].scaleRgb], combineAText, scales[key->s[i].scaleAlpha > 2 ? 2 : key->s[i].scaleAlpha]);
+        if (func == GPU_DOT3_RGBA)
+            EMIT("        alpha = rgb.r;\n");
+        EMIT("        prev = vec4(rgb, alpha);\n    }\n");
+    }
+    if (key->alphaFunc != GPU_ALWAYS)
+    {
+        static const char *const tests[8] = { "false", "true", "al == uAlphaRef", "al != uAlphaRef", "al < uAlphaRef", "al <= uAlphaRef",
+                                              "al > uAlphaRef", "al >= uAlphaRef" };
+
+        EMIT("    float al = floor(prev.a * 255.0 + 0.5) / 255.0;\n    if (!(%s)) discard;\n", tests[key->alphaFunc & 7]);
+    }
+    EMIT("    fragColor = prev;\n}\n");
+#undef EMIT
+    return n;
+}
+
+static VoxVariant *VoxFor(void)
+{
+    VoxKey key;
+    VoxVariant *variant;
+    static const int scales_unused = 0;
+    char *source;
+    GLuint fs;
+    GLint ok = 0;
+
+    (void)scales_unused;
+    memset(&key, 0, sizeof(key));
+    for (unsigned i = 0; i < 6; ++i)
+    {
+        const C3D_TexEnv *e = &G.env[i];
+
+        key.s[i].srcRgb = e->srcRgb & 0xFFF;
+        key.s[i].srcAlpha = e->srcAlpha & 0xFFF;
+        key.s[i].opRgb = e->opRgb & 0xFFF;
+        key.s[i].opAlpha = e->opAlpha & 0xFFF;
+        key.s[i].funcRgb = e->funcRgb;
+        key.s[i].funcAlpha = e->funcAlpha;
+        key.s[i].scaleRgb = e->scaleRgb;
+        key.s[i].scaleAlpha = e->scaleAlpha;
+        if (!TexEnvIsDefault(e))
+            key.stages = i + 1;
+    }
+    key.alphaFunc = G.alphaTest ? (u32)G.alphaFunc : (u32)GPU_ALWAYS;
+    /* A stage past the last used one does not matter: its fields are zero in the key. */
+    for (unsigned i = key.stages; i < 6; ++i)
+        memset(&key.s[i], 0, sizeof(key.s[i]));
+    for (unsigned i = 0; i < sVoxCount; ++i)
+        if (memcmp(&sVox[i].key, &key, sizeof(key)) == 0)
+            return &sVox[i];
+    if (sVoxCount == VOX_VARIANTS)
+    {
+        CtrLog_Write(CTR_LOG_ERROR, "c3d: too many voxel shader variants");
+        return &sVox[VOX_VARIANTS - 1];
+    }
+    source = malloc(16384);
+    if (source == NULL)
+        return &sVox[0];
+    VoxGenerate(&key, source, 16384);
+    fs = Compile(GL_FRAGMENT_SHADER, source);
+    variant = &sVox[sVoxCount];
+    memset(variant, 0, sizeof(*variant));
+    variant->key = key;
+    if (fs != 0)
+    {
+        variant->program = glCreateProgram();
+        glAttachShader(variant->program, sVoxVs);
+        glAttachShader(variant->program, fs);
+        glLinkProgram(variant->program);
+        glDeleteShader(fs);
+        glGetProgramiv(variant->program, GL_LINK_STATUS, &ok);
+    }
+    if (!ok)
+    {
+        CtrLog_Write(CTR_LOG_ERROR, "c3d: voxel variant failed:\n%s", source);
+        free(source);
+        if (variant->program != 0)
+            glDeleteProgram(variant->program);
+        variant->program = 0;
+        ++sVoxCount;
+        return variant;
+    }
+    free(source);
+    variant->reg = glGetUniformLocation(variant->program, "uReg");
+    variant->depth = glGetUniformLocation(variant->program, "uDepth");
+    variant->constants = glGetUniformLocation(variant->program, "uConst");
+    variant->alphaRef = glGetUniformLocation(variant->program, "uAlphaRef");
+    glUseProgram(variant->program);
+    for (int k = 0; k < 3; ++k)
+    {
+        char name[8];
+        GLint location;
+
+        snprintf(name, sizeof(name), "uTex%d", k);
+        location = glGetUniformLocation(variant->program, name);
+        if (location >= 0)
+            glUniform1i(location, k);
+    }
+    ++sVoxCount;
+    CtrLog_Write(CTR_LOG_VIDEO, "c3d: voxel shader variant %u: %u stage(s), alpha test %u", sVoxCount, key.stages, key.alphaFunc);
+    return variant;
 }
 
 /* The shader binary is not read: one vertex shader, with its uniforms' register numbers. */
@@ -2353,20 +2512,61 @@ void C3D_SyncTextureCopy(const u32 *inadr, u32 indim, u32 *outadr, u32 outdim, u
 
 static void ApplyVoxelState(void)
 {
+    VoxVariant *variant = VoxFor();
+    float constants[24];
+
     ApplyTarget();
-    glUseProgram(G.voxProgram);
+    if (variant->program == 0)
+        return;
+    glUseProgram(variant->program);
     for (int unit = 0; unit < 3; ++unit)
     {
         glActiveTexture(GL_TEXTURE0 + (GLenum)unit);
         glBindTexture(GL_TEXTURE_2D, TexReady(CONTEXT_UNITS[unit]));
-        glUniform1i(G.voxTex[unit], unit);
     }
     glActiveTexture(GL_TEXTURE0);
-    glUniform4fv(G.voxReg, 14, &G.regs[0][0]);
-    glUniform2f(G.voxDepth, G.depthScale, G.depthOffset);
-    FillEnv(G.voxSrc, G.voxSrcA, G.voxOp, G.voxOpA, G.voxConst, G.voxStages, true);
-    glUniform1i(G.voxAlphaFunc, G.alphaTest ? (int)G.alphaFunc : (int)GPU_ALWAYS);
-    glUniform1f(G.voxAlphaRef, (float)G.alphaRef / 255.0f);
+    /* Only what differs from what this program last drew with is sent: per chunk, the model-view alone. */
+    for (int i = 0; i < 14;)
+    {
+        int j = i;
+
+        while (j < 14 && (!variant->applied || memcmp(variant->appliedReg[j], G.regs[j], sizeof(G.regs[j])) != 0))
+            ++j;
+        if (j > i)
+        {
+            glUniform4fv(variant->reg + i, j - i, &G.regs[i][0]);
+            memcpy(variant->appliedReg[i], G.regs[i], (size_t)(j - i) * sizeof(G.regs[0]));
+            i = j;
+        }
+        else
+            ++i;
+    }
+    if (!variant->applied || variant->appliedDepth[0] != G.depthScale || variant->appliedDepth[1] != G.depthOffset)
+    {
+        glUniform2f(variant->depth, G.depthScale, G.depthOffset);
+        variant->appliedDepth[0] = G.depthScale;
+        variant->appliedDepth[1] = G.depthOffset;
+    }
+    for (int i = 0; i < 6; ++i)
+    {
+        const C3D_TexEnv *e = &G.env[i];
+
+        constants[i * 4] = (float)(e->color & 255) / 255.0f;
+        constants[i * 4 + 1] = (float)((e->color >> 8) & 255) / 255.0f;
+        constants[i * 4 + 2] = (float)((e->color >> 16) & 255) / 255.0f;
+        constants[i * 4 + 3] = (float)((e->color >> 24) & 255) / 255.0f;
+    }
+    if (!variant->applied || memcmp(variant->appliedConst, constants, sizeof(constants)) != 0)
+    {
+        glUniform4fv(variant->constants, 6, constants);
+        memcpy(variant->appliedConst, constants, sizeof(constants));
+    }
+    if (!variant->applied || variant->appliedRef != (float)G.alphaRef)
+    {
+        glUniform1f(variant->alphaRef, (float)G.alphaRef / 255.0f);
+        variant->appliedRef = (float)G.alphaRef;
+    }
+    variant->applied = true;
     ApplyPipeline();
 }
 
@@ -2412,4 +2612,426 @@ void C3D_DrawArrays(GPU_Primitive_t primitive, int first, int size)
     CountDraw(G.target, true, (unsigned)size / 6);
     glBindVertexArray(G.vao);
     glBindBuffer(GL_ARRAY_BUFFER, G.rawVbo);
+}
+
+/* ══ Extra presents: the frame as it was drawn, again, for a panel that refreshes faster than the game ticks ══
+ *
+ * The game ticks at 60 Hz, one compositor frame each. A 120 Hz panel shows two pictures per tick: the
+ * frame's own, and a second one that is the same frame with the voxel world drawn a half tick on (its
+ * camera and its moving billboards carried forward by what they moved in the tick before), so that a
+ * walk across the world is smooth at the panel's rate. Every draw the compositor issues is recorded as
+ * it is made, with the state it was made in, and the second picture issues them again from the point
+ * where the voxel world is drawn into its surface; the world itself is not recorded but redrawn through
+ * the function it was drawn by (C3D_ReplayWorld), asked for a half tick later. A frame with no voxel world
+ * is shown again as it is. */
+
+typedef struct
+{
+    C3D_RenderTarget *target;
+    bool skip;
+    int sceneW, sceneH;
+    C3D_Mtx view;
+    GPU_SCISSORMODE scissorMode;
+    u32 scissor[4];
+    bool blend;
+    GPU_BLENDEQUATION colorEq, alphaEq;
+    GPU_BLENDFACTOR srcColor, dstColor, srcAlpha, dstAlpha;
+    u32 blendColor;
+    bool alphaTest;
+    GPU_TESTFUNC alphaFunc;
+    int alphaRef;
+    bool depthTest;
+    GPU_TESTFUNC depthFunc;
+    u8 writeMask;
+    C3D_TexEnv env[6];
+    DrawMode mode;
+    C3D_Tex *batchTexture;
+    C3D_AttrInfo attrInfo;
+    u32 stride;
+    float fixed2[3], fixed3[4];
+} Snap;
+
+typedef enum { ENTRY_BATCH, ENTRY_RAW, ENTRY_CLEAR, ENTRY_WORLD } EntryKind;
+
+typedef struct
+{
+    EntryKind kind;
+    Snap snap;
+    size_t data, bytes;        /* arena offset and size: a batch's vertices, a raw draw's vertices */
+    size_t indexData, indexBytes;
+    unsigned quads;
+    int count, type;
+    u8 clearBits;
+    u32 clearColor, clearDepth;
+    C3D_RenderTarget *clearTarget;
+    C3D_WorldDraw world;
+    int eye;
+} Entry;
+
+static struct
+{
+    bool enabled;              /* recording is on: the panel shows more pictures than the game ticks */
+    bool recording, replaying;
+    bool haveWorld;
+    bool valid;                /* a frame has been drawn since the last extra picture */
+    Entry *entries;
+    size_t count, capacity;
+    u8 *arena;
+    size_t used, arenaCapacity;
+    float alpha;               /* how far past the tick the picture being replayed is, in ticks */
+    unsigned swaps;            /* the top screen's swaps since the tick began */
+} R;
+
+static struct { double world, issue, after; unsigned frames; uint64_t worldEnd; } sProf;
+
+static uint64_t NowNs(void)
+{
+    struct timespec now;
+
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (uint64_t)now.tv_sec * 1000000000ull + (uint64_t)now.tv_nsec;
+}
+
+/* settings.txt gpu_prof=1: the voxel world's and the rest of the frame's GPU time, measured with a glFinish around each. */
+int CtrSettings_GetInt(const char *key, int fallback);
+static bool GpuProf(void)
+{
+    static int cached = -1;
+    static unsigned asked;
+
+    if (cached < 0 || ++asked % 600 == 0)
+        cached = CtrSettings_GetInt("gpu_prof", 0) != 0;
+    return cached != 0;
+}
+
+static void SnapTake(Snap *s)
+{
+    s->target = G.target;
+    s->skip = G.skip;
+    s->sceneW = G.sceneW;
+    s->sceneH = G.sceneH;
+    s->view = G.view;
+    s->scissorMode = G.scissorMode;
+    memcpy(s->scissor, G.scissor, sizeof(s->scissor));
+    s->blend = G.blend;
+    s->colorEq = G.colorEq;
+    s->alphaEq = G.alphaEq;
+    s->srcColor = G.srcColor;
+    s->dstColor = G.dstColor;
+    s->srcAlpha = G.srcAlpha;
+    s->dstAlpha = G.dstAlpha;
+    s->blendColor = G.blendColor;
+    s->alphaTest = G.alphaTest;
+    s->alphaFunc = G.alphaFunc;
+    s->alphaRef = G.alphaRef;
+    s->depthTest = G.depthTest;
+    s->depthFunc = G.depthFunc;
+    s->writeMask = G.writeMask;
+    memcpy(s->env, G.env, sizeof(s->env));
+    s->mode = G.mode;
+    s->batchTexture = G.batchTexture;
+    s->attrInfo = G.attrInfo;
+    s->stride = G.bufInfo.stride;
+    memcpy(s->fixed2, G.fixed[2], sizeof(s->fixed2));
+    memcpy(s->fixed3, G.fixed[3], sizeof(s->fixed3));
+}
+
+static void SnapPut(const Snap *s)
+{
+    G.target = s->target;
+    G.skip = s->skip;
+    G.sceneW = s->sceneW;
+    G.sceneH = s->sceneH;
+    G.view = s->view;
+    G.scissorMode = s->scissorMode;
+    memcpy(G.scissor, s->scissor, sizeof(G.scissor));
+    G.blend = s->blend;
+    G.colorEq = s->colorEq;
+    G.alphaEq = s->alphaEq;
+    G.srcColor = s->srcColor;
+    G.dstColor = s->dstColor;
+    G.srcAlpha = s->srcAlpha;
+    G.dstAlpha = s->dstAlpha;
+    G.blendColor = s->blendColor;
+    G.alphaTest = s->alphaTest;
+    G.alphaFunc = s->alphaFunc;
+    G.alphaRef = s->alphaRef;
+    G.depthTest = s->depthTest;
+    G.depthFunc = s->depthFunc;
+    G.writeMask = s->writeMask;
+    memcpy(G.env, s->env, sizeof(G.env));
+    G.mode = s->mode;
+    G.batchTexture = s->batchTexture;
+    G.attrInfo = s->attrInfo;
+    G.bufInfo.stride = s->stride;
+    memcpy(G.fixed[2], s->fixed2, sizeof(s->fixed2));
+    memcpy(G.fixed[3], s->fixed3, sizeof(s->fixed3));
+}
+
+static Entry *EntryAdd(EntryKind kind)
+{
+    Entry *entry;
+
+    if (R.count == R.capacity)
+    {
+        size_t capacity = R.capacity != 0 ? R.capacity * 2 : 512;
+        Entry *grown = realloc(R.entries, capacity * sizeof(Entry));
+
+        if (grown == NULL)
+        {
+            R.recording = false;
+            return NULL;
+        }
+        R.entries = grown;
+        R.capacity = capacity;
+    }
+    entry = &R.entries[R.count++];
+    memset(entry, 0, sizeof(*entry));
+    entry->kind = kind;
+    return entry;
+}
+
+static bool ArenaCopy(const void *data, size_t bytes, size_t *offset)
+{
+    if (R.used + bytes > R.arenaCapacity)
+    {
+        size_t capacity = R.arenaCapacity != 0 ? R.arenaCapacity : (size_t)1 << 20;
+        u8 *grown;
+
+        while (capacity < R.used + bytes)
+            capacity *= 2;
+        grown = realloc(R.arena, capacity);
+        if (grown == NULL)
+        {
+            R.recording = false;
+            return false;
+        }
+        R.arena = grown;
+        R.arenaCapacity = capacity;
+    }
+    memcpy(R.arena + R.used, data, bytes);
+    *offset = R.used;
+    R.used += (bytes + 15) & ~(size_t)15;
+    return true;
+}
+
+static bool Recording(void) { return R.recording && !R.replaying; }
+
+static void RecordBatch(void)
+{
+    Entry *entry;
+    size_t offset;
+
+    if (!Recording() || (entry = EntryAdd(ENTRY_BATCH)) == NULL)
+        return;
+    SnapTake(&entry->snap);
+    entry->quads = G.quads;
+    if (!ArenaCopy(G.vertices, (size_t)G.quads * 4 * sizeof(BatchVertex), &offset))
+        --R.count;
+    else
+        entry->data = offset;
+}
+
+static void RecordRaw(const u8 *vertices, size_t vertexBytes, const void *indices, int count, int type)
+{
+    Entry *entry;
+    size_t indexBytes = (size_t)count * (type == C3D_UNSIGNED_BYTE ? 1 : 2);
+
+    if (!Recording() || (entry = EntryAdd(ENTRY_RAW)) == NULL)
+        return;
+    SnapTake(&entry->snap);
+    entry->count = count;
+    entry->type = type;
+    entry->bytes = vertexBytes;
+    entry->indexBytes = indexBytes;
+    if (!ArenaCopy(vertices, vertexBytes, &entry->data) || !ArenaCopy(indices, indexBytes, &entry->indexData))
+        --R.count;
+}
+
+static void RecordClear(C3D_RenderTarget *target, u8 bits, u32 color, u32 depth)
+{
+    Entry *entry;
+
+    if (!Recording() || (entry = EntryAdd(ENTRY_CLEAR)) == NULL)
+        return;
+    entry->clearTarget = target;
+    entry->clearBits = bits;
+    entry->clearColor = color;
+    entry->clearDepth = depth;
+}
+
+void C3D_ReplayEnable(bool on)
+{
+    if (R.enabled != on)
+    {
+        R.enabled = on;
+        R.recording = false;
+        R.haveWorld = false;
+        R.count = R.used = 0;
+    }
+}
+
+/* The compositor draws the voxel world through here: the draw is made now, and remembered to be made again. */
+void C3D_ReplayWorld(C3D_WorldDraw draw, C3D_RenderTarget *target, int eye)
+{
+    if (Recording())
+    {
+        Entry *entry = EntryAdd(ENTRY_WORLD);
+
+        if (entry != NULL)
+        {
+            entry->world = draw;
+            entry->clearTarget = target;
+            entry->eye = eye;
+            R.haveWorld = true;
+        }
+    }
+    if (GpuProf())
+    {
+        uint64_t t0, t1;
+
+        uint64_t tc;
+
+        glFinish();
+        t0 = NowNs();
+        draw(target, eye, 0.0f);
+        tc = NowNs();
+        glFinish();
+        t1 = NowNs();
+        sProf.issue += (double)(tc - t0) / 1e6;
+        sProf.world += (double)(t1 - t0) / 1e6;
+        sProf.worldEnd = t1;
+        return;
+    }
+    draw(target, eye, 0.0f);
+}
+
+static void ReplayClear(C3D_RenderTarget *target, u8 clearBits, u32 clearColor, u32 clearDepth)
+{
+    C3D_RenderTargetClear(target, clearBits, clearColor, clearDepth);
+}
+
+static bool EntryIsBottom(const Entry *entry)
+{
+    const C3D_RenderTarget *target = entry->kind == ENTRY_CLEAR || entry->kind == ENTRY_WORLD ? entry->clearTarget : entry->snap.target;
+
+    return target != NULL && target->bottom;
+}
+
+/* Shows a picture on the top screen: the frame's recorded draws from the voxel world on, or the finished picture again. */
+bool C3D_ExtraFrame(float alpha)
+{
+    size_t first = R.count;
+
+    if (!R.enabled || !R.valid || G.topFbo == 0)
+        return false;
+    AndroidHost_GlMakeCurrent();
+    if (R.haveWorld && R.count != 0)
+    {
+        Snap saved;
+        bool savedInFrame = G.inFrame;
+        unsigned savedQuads = G.quads;
+
+        for (size_t i = 0; i < R.count; ++i)
+            if (R.entries[i].kind == ENTRY_WORLD)
+            {
+                first = i;
+                break;
+            }
+        /* Back over what cleared the surface it is drawn into just before. */
+        while (first > 0 && R.entries[first - 1].kind == ENTRY_CLEAR && R.entries[first - 1].clearTarget == R.entries[first].clearTarget)
+            --first;
+        SnapTake(&saved);
+        G.quads = 0;
+        G.inFrame = true;
+        R.replaying = true;
+        R.alpha = alpha;
+        for (size_t i = first; i < R.count; ++i)
+        {
+            Entry *entry = &R.entries[i];
+
+            if (EntryIsBottom(entry))
+                continue;
+            switch (entry->kind)
+            {
+            case ENTRY_CLEAR:
+                ReplayClear(entry->clearTarget, entry->clearBits, entry->clearColor, entry->clearDepth);
+                break;
+            case ENTRY_WORLD:
+                entry->world(entry->clearTarget, entry->eye, alpha);
+                break;
+            case ENTRY_BATCH:
+                SnapPut(&entry->snap);
+                DrawBatchNow((const BatchVertex *)(R.arena + entry->data), entry->quads);
+                break;
+            case ENTRY_RAW:
+                SnapPut(&entry->snap);
+                DrawRawNow(R.arena + entry->data, entry->bytes, R.arena + entry->indexData, entry->count, entry->type);
+                break;
+            }
+        }
+        R.replaying = false;
+        SnapPut(&saved);
+        G.quads = savedQuads;
+        G.inFrame = savedInFrame;
+    }
+    ShowTop();
+    return true;
+}
+
+bool C3D_ReplayRecording(void) { return R.enabled; }
+
+static void ReplayFrameEnd(void)
+{
+    R.recording = false;
+    R.valid = R.enabled;
+    if (GpuProf())
+    {
+        uint64_t t;
+
+        glFinish();
+        t = NowNs();
+        if (sProf.worldEnd != 0)
+            sProf.after += (double)(t - sProf.worldEnd) / 1e6;
+        sProf.worldEnd = 0;
+        if (++sProf.frames == 300)
+        {
+            CtrLog_Write(CTR_LOG_VIDEO, "GPU PROF per frame: world %.2f ms (%.2f ms to issue), compose after it %.2f ms", sProf.world / sProf.frames,
+                         sProf.issue / sProf.frames, sProf.after / sProf.frames);
+            memset(&sProf, 0, sizeof(sProf));
+        }
+    }
+}
+
+static void ReplayFrameBegin(void)
+{
+    bool wanted = AndroidHost_PresentsPerTick() > 1;
+
+    R.valid = false;
+    if (wanted != R.enabled)
+        C3D_ReplayEnable(wanted);
+    if (!R.enabled)
+        return;
+    R.count = 0;
+    R.used = 0;
+    R.haveWorld = false;
+    R.recording = true;
+}
+
+/* After the frame's own present (3ds_platform.c): the pictures a faster panel shows for the same tick. */
+int CtrSettings_GetInt(const char *key, int fallback);
+
+void AndroidVideo_PresentExtra(void)
+{
+    static unsigned ticks;
+    unsigned presents;
+
+    /* settings.txt refresh_hz=60 asks the system for 60 Hz (battery); the default is the panel's best. */
+    if (++ticks % 60 == 1)
+        AndroidHost_SetRefreshHint(CtrSettings_GetInt("refresh_hz", 120));
+    presents = AndroidHost_PresentsPerTick();
+
+    for (unsigned i = 1; i < presents; ++i)
+        C3D_ExtraFrame((float)i / (float)presents);
+    R.valid = false;
 }

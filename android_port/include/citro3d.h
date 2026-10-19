@@ -92,6 +92,7 @@ typedef struct C3D_RenderTarget_tag
     gfxScreen_t screenId;
     gfx3dSide_t side;
     u32 glFramebuffer, glDepth;
+    bool bottom;                /* the bottom screen's canvas: left out of the extra presents */
     u32 glScale;                /* GL pixels per scene unit, along each axis */
     C3D_Tex *tex;
 } C3D_RenderTarget;
@@ -206,6 +207,16 @@ void C3D_FixedAttribSet(int id, float x, float y, float z, float w);
 void C3D_DrawElements(GPU_Primitive_t primitive, int count, int type, const void *indices);
 
 void Mtx_Identity(C3D_Mtx *out);
+
+/* ── Extra presents (c3d_gles.c): a panel that refreshes faster than the game ticks shows the frame
+ *    again, with the voxel world a part of a tick on. The compositor draws the world through
+ *    C3D_ReplayWorld, so that it can be drawn again for the second picture (alpha 0.5: half a tick). ── */
+typedef void (*C3D_WorldDraw)(C3D_RenderTarget *target, int eye, float alpha);
+void C3D_ReplayEnable(bool on);
+void C3D_ReplayWorld(C3D_WorldDraw draw, C3D_RenderTarget *target, int eye);
+/* The extra picture; false when there is nothing to show it on. */
+bool C3D_ExtraFrame(float alpha);
+bool C3D_ReplayRecording(void);
 
 /* ── Matrices and vectors (citro3d's math, right handed, in the PICA's clip space: x and y in
  *    [-w, w], z in [-w, 0] from the near plane to the far one) ────────────────────────────── */

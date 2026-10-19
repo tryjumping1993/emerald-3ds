@@ -759,6 +759,12 @@ static float sStereoSlider;
 static int sDrawEye = -1;
 static float StereoIod(float *screen);
 static float CameraTanX(void);
+/* The billboards' vertices a draw reads: this tick's, or (an extra picture) carried on. */
+#ifdef PLATFORM_ANDROID
+#define DYNAMIC_VERTICES sDynBound
+#else
+#define DYNAMIC_VERTICES sDynamic
+#endif
 /* The frustum the chunks are picked by (UpdateFrustum) is widened by this
  * many times the pair's parallax of the far distance: what an eye sees past
  * the middle camera's edge, with room to spare. */
@@ -7626,7 +7632,157 @@ static void DrawStatics(const C3D_Mtx *view, const VoxelLight *dapples, bool glo
     }
 }
 
+#ifdef PLATFORM_ANDROID
+/*
+ * Extra pictures (c3d_gles.c, C3D_ExtraFrame): the panel shows the frame again a part of a tick on, with the
+ * camera and the moving billboards carried on by what they moved in the tick before. Only what moves is
+ * kept: the camera, and the vertices of the billboards, their shadows and reflections (the chunks and the
+ * lamps stand still).
+ */
+static VoxelCamera sCameraLast, sCameraBefore;
+static uint32_t sCameraFrame;
+static VoxelGpuVertex sDynLast[VOXEL_DYNAMIC_VERTICES], sDynBefore[VOXEL_DYNAMIC_VERTICES], sDynView[VOXEL_DYNAMIC_VERTICES];
+static unsigned sDynCount[3], sDynCountBefore[3];
+static int sDynOriginX[2], sDynOriginZ[2];
+static bool sDynBeforeValid;
+static const VoxelGpuVertex *sDynBound;
+static unsigned sCarried, sReplays;
+static float sCarriedMove;
+
+static void DynRanges(unsigned first[3], unsigned count[3])
+{
+    first[0] = 0;
+    count[0] = sSpriteVertices;
+    first[1] = VOXEL_REFLECTION_FIRST;
+    count[1] = sReflectionVertices;
+#if CTR_VOXEL_LIGHTING
+    first[2] = VOXEL_SHADOW_FIRST;
+    count[2] = sShadowVertices;
+#else
+    first[2] = 0;
+    count[2] = 0;
+#endif
+}
+
+/* This tick's picture is being drawn: what moved since the last one is what the extra picture carries on. */
+static void ReplayNote(void)
+{
+    unsigned first[3], count[3];
+
+    sDynBeforeValid = sCameraFrame + 1u == sFrame;
+    sCameraBefore = sCameraFrame + 1u == sFrame ? sCameraLast : sCamera;
+    sCameraLast = sCamera;
+    sCameraFrame = sFrame;
+    memcpy(sDynBefore, sDynLast, sizeof(sDynBefore));
+    memcpy(sDynCountBefore, sDynCount, sizeof(sDynCount));
+    sDynOriginX[0] = sDynOriginX[1];
+    sDynOriginZ[0] = sDynOriginZ[1];
+    DynRanges(first, count);
+    for (int range = 0; range < 3; ++range)
+    {
+        sDynCount[range] = count[range];
+        memcpy(sDynLast + first[range], sDynamic + first[range], count[range] * sizeof(VoxelGpuVertex));
+    }
+    sDynOriginX[1] = sDynamicX;
+    sDynOriginZ[1] = sDynamicZ;
+}
+
+static float Carry(float last, float before, float alpha, float limit)
+{
+    float d = last - before;
+
+    return d > limit || d < -limit ? last : last + d * alpha;
+}
+
+/* The camera and the billboards as `alpha` of a tick on; false when nothing is to be carried on. */
+static bool ReplayCarry(float alpha)
+{
+    unsigned first[3], count[3];
+
+    if (sCameraFrame != sFrame || !sDynBeforeValid)
+        return false;
+    sCarried++;
+    sCarriedMove += fabsf(sCameraLast.x - sCameraBefore.x) + fabsf(sCameraLast.z - sCameraBefore.z);
+    sCamera.x = Carry(sCameraLast.x, sCameraBefore.x, alpha, 2.5f);
+    sCamera.y = Carry(sCameraLast.y, sCameraBefore.y, alpha, 2.5f);
+    sCamera.z = Carry(sCameraLast.z, sCameraBefore.z, alpha, 2.5f);
+    sCamera.targetX = Carry(sCameraLast.targetX, sCameraBefore.targetX, alpha, 2.5f);
+    sCamera.targetY = Carry(sCameraLast.targetY, sCameraBefore.targetY, alpha, 2.5f);
+    sCamera.targetZ = Carry(sCameraLast.targetZ, sCameraBefore.targetZ, alpha, 2.5f);
+    DynRanges(first, count);
+    memcpy(sDynView, sDynLast, sizeof(sDynView));
+    for (int range = 0; range < 3; ++range)
+    {
+        float shiftX = (float)(sDynOriginX[0] - sDynOriginX[1]) * VOXEL_POS_SCALE;
+        float shiftZ = (float)(sDynOriginZ[0] - sDynOriginZ[1]) * VOXEL_POS_SCALE;
+
+        if (sDynCountBefore[range] != count[range])
+            continue;
+        for (unsigned i = 0; i < count[range]; ++i)
+        {
+            const VoxelGpuVertex *last = &sDynLast[first[range] + i], *before = &sDynBefore[first[range] + i];
+            VoxelGpuVertex *out = &sDynView[first[range] + i];
+            float dx = (float)last->x - ((float)before->x + shiftX), dy = (float)last->y - (float)before->y,
+                  dz = (float)last->z - ((float)before->z + shiftZ);
+
+            /* A sprite that appeared, left, or took another place in the list is not carried. */
+            if (dx > 768.0f || dx < -768.0f || dy > 768.0f || dy < -768.0f || dz > 768.0f || dz < -768.0f)
+                continue;
+            out->x = (int16_t)lroundf((float)last->x + dx * alpha);
+            out->y = (int16_t)lroundf((float)last->y + dy * alpha);
+            out->z = (int16_t)lroundf((float)last->z + dz * alpha);
+        }
+    }
+    sDynBound = sDynView;
+    return true;
+}
+#endif
+
+static void DrawWorldBody(C3D_RenderTarget *target, int eye);
+
+/* The world as it is at the tick, or (alpha above 0) a part of a tick on. */
+static void DrawWorld(C3D_RenderTarget *target, int eye, float alpha)
+{
+#ifdef PLATFORM_ANDROID
+    VoxelCamera saved = sCamera;
+
+    sDynBound = sDynamic;
+    if (alpha > 0.0f)
+    {
+        ++sReplays;
+        if (!ReplayCarry(alpha))
+            sCamera = saved;
+    }
+    else if (sReady && sDrawCount != 0)
+    {
+        ReplayNote();
+        if (sFrame % 600u == 0u && sReplays != 0)
+        {
+            CtrLog_Write(CTR_LOG_VIDEO, "VOXEL extra pictures: %u drawn, %u carried on, the camera moved %.4f tiles a tick on average",
+                         sReplays, sCarried, sCarried != 0 ? sCarriedMove / (float)sCarried : 0.0f);
+            sReplays = sCarried = 0;
+            sCarriedMove = 0.0f;
+        }
+    }
+    DrawWorldBody(target, eye);
+    sCamera = saved;
+    sDynBound = sDynamic;
+#else
+    (void)alpha;
+    DrawWorldBody(target, eye);
+#endif
+}
+
 void CtrVoxel_Draw(C3D_RenderTarget *target, int eye)
+{
+#ifdef PLATFORM_ANDROID
+    C3D_ReplayWorld(DrawWorld, target, eye);
+#else
+    DrawWorld(target, eye, 0.0f);
+#endif
+}
+
+static void DrawWorldBody(C3D_RenderTarget *target, int eye)
 {
     C3D_Mtx projection, view;
     C3D_AttrInfo *attr;
@@ -7775,7 +7931,7 @@ void CtrVoxel_Draw(C3D_RenderTarget *target, int eye)
 
     /* Billboards and shadows: the linear buffer, around the camera's tile. */
     SetModelView(&view, sDynamicX, sDynamicZ);
-    BindVertices(sDynamic);
+    BindVertices(DYNAMIC_VERTICES);
 
     if (!indoor && !sBattle.on && CtrGame_IsOutdoor() && CtrDayNight_Get()->glow > 0.0f
         && sLampGpu != NULL && (sLampVertices != 0 || sLampGroundVertices != 0))
@@ -7802,7 +7958,7 @@ void CtrVoxel_Draw(C3D_RenderTarget *target, int eye)
             C3D_DrawArrays(GPU_TRIANGLES, 0, sLampVertices);
         }
         SetModelView(&view, sDynamicX, sDynamicZ);
-        BindVertices(sDynamic);
+        BindVertices(DYNAMIC_VERTICES);
         C3D_DepthMap(true, -1.0f, 0.0f);
         C3D_AlphaTest(true, GPU_GREATER, 0);
         C3D_ColorLogicOp(GPU_LOGICOP_COPY);

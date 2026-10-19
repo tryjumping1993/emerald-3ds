@@ -65,6 +65,14 @@ void AndroidHost_PresentBottom(const uint32_t *rgba, int width, int height);
  * framebuffer is the top screen.
  */
 void AndroidHost_GlMakeCurrent(void);
+/*
+ * The panel's refresh against the game's 60 ticks a second. The host times the top screen's swaps (each
+ * one waits for a vsync): a panel at 120 Hz gets two pictures per tick, so the engine presents again after
+ * its frame (PresentsPerTick 2) and the swaps, not the game, pace it; at 60 Hz it is 1. The hint is the
+ * refresh rate asked of the system for the top surface (60 or 120), what the player's refresh_hz setting says.
+ */
+unsigned AndroidHost_PresentsPerTick(void);
+void AndroidHost_SetRefreshHint(int hz);
 bool AndroidHost_TopBegin(int *width, int *height);
 void AndroidHost_TopEnd(void);
 /* The size of the surface a screen has now, in pixels; 0 x 0 without one. */

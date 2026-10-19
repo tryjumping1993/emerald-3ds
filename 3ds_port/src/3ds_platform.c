@@ -347,6 +347,11 @@ static void UpdateHomeAllowed(void)
         CtrVideo_ShowNoHome();
 }
 
+#ifdef PLATFORM_ANDROID
+/* The pictures a panel that refreshes faster than the game ticks shows for one tick (c3d_gles.c). */
+void AndroidVideo_PresentExtra(void);
+#endif
+
 void CtrPlatform_EndFrame(void)
 {
     if (sWaiting)
@@ -375,6 +380,9 @@ void CtrPlatform_EndFrame(void)
     if (sHooks.videoPresent && shown)
     {
         sHooks.videoPresent();
+#ifdef PLATFORM_ANDROID
+        AndroidVideo_PresentExtra();
+#endif
         /* The present's own work, without its wait for the display. */
         sPresentMs = (svcGetSystemTick() - presentStart) * 1000.0f / SYSCLOCK_ARM11
                      - CtrVideo_GetStats()->waitMs;

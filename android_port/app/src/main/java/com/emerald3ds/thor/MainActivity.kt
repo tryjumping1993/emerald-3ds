@@ -171,7 +171,7 @@ class MainActivity : Activity(), DisplayManager.DisplayListener, InputManager.In
     private fun refreshDisplays() {
         if (!started || companionLost) return
         val own = activityDisplay
-        RefreshPolicy.request(window, own, 60)
+        RefreshPolicy.request(window, own, 120)
         presentation?.let { RefreshPolicy.request(it.window!!, it.display, 60) }
         companionActivity?.let { RefreshPolicy.request(it.window, it.activityDisplay, 60) }
         val usable = displays.displays

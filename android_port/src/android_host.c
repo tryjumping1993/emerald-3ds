@@ -136,6 +136,8 @@ static EGLContext s_context = EGL_NO_CONTEXT;
 static EGLSurface s_idleSurface = EGL_NO_SURFACE; /* keeps the context current while no screen has a surface */
 static GLuint s_program;
 static SetFrameRateFn s_setFrameRate;
+static int s_refreshHint = 120;
+static unsigned s_presentsPerTick = 1;
 static bool s_rebuilding;
 /* The bottom canvas is only presented when it changes, so the host keeps the last one to
  * redraw it onto a surface that arrives later or after the context was lost. The top frame is
@@ -394,7 +396,7 @@ static void attachSurface(int index)
     eglMakeCurrent(s_display, s->surface, s->surface, s_context);
     eglSwapInterval(s_display, index == SCREEN_TOP ? 1 : 0);
     if (index == SCREEN_TOP && s_setFrameRate != NULL)
-        s_setFrameRate(s->window, 60.f, 0 /* ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT */);
+        s_setFrameRate(s->window, (float)s_refreshHint, 0 /* ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT */);
     EGLint w = 0, h = 0;
     eglQuerySurface(s_display, s->surface, EGL_WIDTH, &w);
     eglQuerySurface(s_display, s->surface, EGL_HEIGHT, &h);
@@ -544,11 +546,79 @@ bool AndroidHost_TopBegin(int *width, int *height)
     return w > 0 && h > 0;
 }
 
+/*
+ * Each swap of the top surface waits for a vsync, so the time between two says the panel's period. The
+ * least of the last few is taken for it (a late frame lengthens one, never shortens): under 11.5 ms the panel
+ * is at 120 Hz and each tick wants two pictures; over, one.
+ */
+static void noteSwap(void)
+{
+    enum { WINDOW = 24 };
+    static double last, intervals[WINDOW];
+    static unsigned count;
+    struct timespec now;
+    double ms;
+
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    ms = (double)now.tv_sec * 1000.0 + (double)now.tv_nsec / 1e6;
+    if (last != 0.0)
+    {
+        static double sum, worst;
+        static unsigned seen, late;
+        double d = ms - last;
+
+        sum += d;
+        if (d > worst) worst = d;
+        if (d > 12.0) ++late;
+        if (++seen == 600)
+        {
+            LOGI("top swaps: mean %.2f ms, worst %.2f ms, %u over 12 ms, %u picture(s) per tick", sum / seen, worst, late, s_presentsPerTick);
+            sum = worst = 0.0; seen = late = 0;
+        }
+        intervals[count++ % WINDOW] = ms - last;
+        if (count >= WINDOW)
+        {
+            double least = intervals[0];
+            unsigned wanted;
+
+            for (unsigned i = 1; i < WINDOW; ++i)
+                if (intervals[i] < least)
+                    least = intervals[i];
+            wanted = least < 11.5 ? 2u : 1u;
+            if (wanted != s_presentsPerTick)
+            {
+                s_presentsPerTick = wanted;
+                LOGI("top swaps every %.2f ms: %u picture(s) per tick", least, wanted);
+            }
+        }
+    }
+    last = ms;
+}
+
+unsigned AndroidHost_PresentsPerTick(void) { return s_presentsPerTick; }
+
+/* The refresh rate asked of the system for the top surface, now and for every surface made after. */
+void AndroidHost_SetRefreshHint(int hz)
+{
+    Screen *s = &s_screen[SCREEN_TOP];
+
+    hz = hz >= 100 ? 120 : 60;
+    if (hz == s_refreshHint)
+        return;
+    s_refreshHint = hz;
+    if (s->window != NULL && s_setFrameRate != NULL)
+        s_setFrameRate(s->window, (float)hz, 0);
+    if (hz == 60)
+        s_presentsPerTick = 1;
+}
+
 void AndroidHost_TopEnd(void)
 {
     Screen *s = &s_screen[SCREEN_TOP];
     if (s->surface != EGL_NO_SURFACE && !eglSwapBuffers(s_display, s->surface))
         surfaceFailed(SCREEN_TOP, eglGetError());
+    else
+        noteSwap();
 }
 
 void AndroidHost_PresentTop(const uint32_t *rgba, int width, int height) { present(SCREEN_TOP, rgba, width, height); }
