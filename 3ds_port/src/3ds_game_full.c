@@ -45,6 +45,8 @@
 #include "battle_setup.h"
 #include "script_pokemon_util.h"
 #include "constants/species.h"
+#include "constants/items.h"
+#include "pokemon.h"
 #include "field_screen_effect.h"
 #endif
 #ifdef CTR_TEST_EXT_PALETTE
@@ -1147,6 +1149,9 @@ static void MeasureAid(void)
     CtrLog_Write(CTR_LOG_GAME, "measure aid: step %u at frame %lu", sNext, (unsigned long)sFrames);
     if (sSteps[sNext].battle)
     {
+        /* A save from before the first starter has no party to fight with. */
+        if (gPlayerPartyCount == 0)
+            ScriptGiveMon(SPECIES_TORCHIC, 5, ITEM_NONE, 0, 0, 0);
         CreateScriptedWildMon(SPECIES_ZIGZAGOON, 5, 0);
         BattleSetup_StartScriptedWildBattle();
     }

@@ -38,13 +38,18 @@ SCRIPTS := ../tools/port_common
 EXESUFFIX := .exe
 TARGET := emerald3ds
 APP_VERSION := 0.4.0
-VOXEL ?= 0
+VOXEL ?= 1
 VOXEL_LIGHTING ?= 1
 SHOW_FPS ?= 1
 DATA_BACKEND ?= 0
 GAMEFLAGS := -DPORTABLE -DPLATFORM_3DS -DPLATFORM_ANDROID -DMODERN=1 -DUBFIX -D__INTELLISENSE__
 GAMEFLAGS += -iquote include -iquote ../include -iquote ../include/constants -iquote ..
 GAMEFLAGS += -DCTR_VOXEL_ENABLED=$(VOXEL) -DCTR_VOXEL_LIGHTING=$(VOXEL_LIGHTING) -DCTR_SHOW_FPS=$(SHOW_FPS)
+# 1: measure.txt in the files directory warps the player and starts a wild battle (3ds_game_full.c, MeasureAid).
+MEASURE_AID ?= 0
+ifeq ($(MEASURE_AID),1)
+GAMEFLAGS += -DCTR_MEASURE_AID
+endif
 CFLAGS := $(ARCH) -O2 -g -std=gnu99 -Wall -Wextra -Werror -ffunction-sections -fdata-sections
 GAMECFLAGS := $(filter-out -Werror,$(CFLAGS)) -fsigned-char -fno-strict-aliasing
 GAMECFLAGS += -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration
