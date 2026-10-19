@@ -64,11 +64,21 @@ def collect(payload: Path, package: Path = PACKAGE, licenses_root: Path = ROOT) 
         files["payload/" + name] = src.read_bytes()
     # Other languages: payload/<lang>/ with their own executable and recipe.
     for sub in sorted(p for p in payload.iterdir() if p.is_dir() and (p / "emerald3ds.recipe").is_file()):
+        if sub.name == "android":
+            continue
         for name in VARIANT_FILES:
             src = sub / name
             if not src.is_file():
                 raise SystemExit("build_web_payload: %s is missing" % src)
             files["payload/%s/%s" % (sub.name, name)] = src.read_bytes()
+    android = payload / "android"
+    if android.is_dir():
+        for variant in [android] + sorted(p for p in android.iterdir() if p.is_dir() and (p / "emerald3ds.recipe").is_file()):
+            for name in ("Emerald3DS-Thor.apk", "emerald3ds.recipe"):
+                src = variant / name
+                if not src.is_file():
+                    raise SystemExit("build_web_payload: %s is missing" % src)
+                files["payload/" + src.relative_to(payload).as_posix()] = src.read_bytes()
     voxelgen = payload / "voxelgen"
     if voxelgen.is_dir():
         for path in sorted(voxelgen.rglob("*")):
@@ -83,6 +93,9 @@ def collect(payload: Path, package: Path = PACKAGE, licenses_root: Path = ROOT) 
             path = licenses_root / "public" / src  # the private workspace keeps them in public/
         if path.is_file():
             files["licenses/" + dst] = path.read_bytes()
+    icon_notice = licenses_root / "android_port/ICON.md"
+    if android.is_dir() and icon_notice.is_file():
+        files["licenses/Thor-icon-NOTICE.md"] = icon_notice.read_bytes()
     return files
 
 
@@ -130,7 +143,7 @@ def make_manifest(files: dict[str, bytes], version: str, tag: str, cia_forwarder
     }
     variants = []
     for lang in sorted({p.split("/")[1] for p in files if p.count("/") == 2 and p.startswith("payload/")
-                        and p.endswith("/emerald3ds.recipe")}):
+                        and p.endswith("/emerald3ds.recipe") and not p.startswith("payload/android/")}):
         sub = "payload/%s/" % lang
         variant_recipe = Recipe.from_bytes(files[sub + "emerald3ds.recipe"])
         variants.append({
@@ -142,6 +155,17 @@ def make_manifest(files: dict[str, bytes], version: str, tag: str, cia_forwarder
             "assets": {"threeDsx": ref(sub + "Emerald3DS.3dsx", "Emerald3DS-%s.3dsx" % lang),
                        "smdh": ref(sub + "Emerald3DS.smdh"),
                        "recipe": ref(sub + "emerald3ds.recipe")},
+        })
+    for path in sorted(p for p in files if p.startswith("payload/android/") and p.endswith("/emerald3ds.recipe")):
+        sub = path.rsplit("/", 1)[0] + "/"
+        variant_recipe = Recipe.from_bytes(files[path])
+        language = sub[len("payload/android/"):].strip("/")
+        variants.append({
+            "platform": "thor", "rom": rom_entry(variant_recipe.rom_sha1),
+            "dataAbi": "%08x" % variant_recipe.engine_abi, "recipeRelease": variant_recipe.release,
+            "assets": {"apk": ref(sub + "Emerald3DS-Thor.apk", "Emerald3DS-Thor%s.apk" % ("-" + language if language else "")),
+                       "recipe": ref(path)},
+            "install": {"directory": "emerald3ds", "files": ["Emerald3DS-Thor.apk", "emerald3ds.pak"]},
         })
     if variants:
         manifest["variants"] = variants

@@ -2,27 +2,14 @@
  * The two additions to the game's layout the 3DS script made (3ds_port/emerald3ds.ld.in),
  * as a partial script for lld that leaves the Android linker's own layout alone:
  *
- *  - the game's own variables lead .data and .bss, between __ctr_game_* symbols, for the
+ *  - the game's own variables have __ctr_game_* symbols, for the
  *    soft reset (3ds_game_full.c keeps a copy of them as AgbMain first starts);
- *  - the read-only data of the game translation units (build/root/src, build/root/data)
+ *  - the initialized variables and read-only data of the game translation units
  *    is gathered in .gamedata after .data. The image link keeps its contents so they can be
  *    extracted; the shipped library reserves it NOLOAD, and the bytes arrive from the data
  *    pack at start-up (3ds_port/scripts/gen_gamedata_bundle.py). @GAMEDATA_TYPE@ is empty in
  *    the first and (NOLOAD) in the second.
  */
-SECTIONS
-{
-	.game_data :
-	{
-		__ctr_game_data = .;
-		EXCLUDE_FILE(*build/root/src/platform/*) *build/root/src/*(.data .data.*)
-		*build/root/data/*(.data .data.*)
-		. = ALIGN(4);
-		__ctr_game_data_end = .;
-	}
-}
-INSERT BEFORE .data;
-
 SECTIONS
 {
 	.game_bss :
@@ -41,6 +28,14 @@ SECTIONS
 	.gamedata ALIGN(32) @GAMEDATA_TYPE@ :
 	{
 		__ctr_gamedata = .;
+		/* PIC puts const tables containing pointers in .data.rel.ro.*.
+		 * Keep those, and the game's initial RAM image, in the private pack.
+		 * The loader fills this writable region before the soft-reset snapshot. */
+		__ctr_game_data = .;
+		EXCLUDE_FILE(*build/root/src/platform/*) *build/root/src/*(.data .data.*)
+		*build/root/data/*(.data .data.*)
+		. = ALIGN(4);
+		__ctr_game_data_end = .;
 		*build/root/src/*(.rodata .roda .rodata.*)
 		*build/root/data/*(.rodata .roda .rodata.*)
 		. = ALIGN(4);

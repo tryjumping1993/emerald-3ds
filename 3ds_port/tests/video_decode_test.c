@@ -33,8 +33,13 @@ int main(void)
             assert(offset / 64 == (y / 8) * 128 + x / 8);
         }
     assert(CtrVideo_Texel(1, 0, 8) == 1);
+#ifdef PLATFORM_ANDROID
+    assert(CtrVideo_Texel(0, 1, 8) == 8);
+    assert(CtrVideo_Texel(4, 4, 8) == 36);
+#else
     assert(CtrVideo_Texel(0, 1, 8) == 2);
     assert(CtrVideo_Texel(4, 4, 8) == 48);
+#endif
 
     /* Screen-block boundaries, wrapping and OBJ 1D/2D layouts. */
     assert(CtrVideo_TextMapOffset(32, 0, 0) == 0);

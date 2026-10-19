@@ -3,8 +3,12 @@ package com.emerald3ds.thor
 import android.app.Activity
 import android.app.ActivityManager
 import android.app.ActivityOptions
+import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.graphics.Color
 import android.hardware.display.DisplayManager
@@ -12,6 +16,8 @@ import android.hardware.input.InputManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.os.Build
 import android.util.Log
 import android.view.Display
 import android.view.Gravity
@@ -38,8 +44,18 @@ class MainActivity : Activity(), DisplayManager.DisplayListener, InputManager.In
     private lateinit var status: TextView
     private var presentation: CompanionPresentation? = null
     private var companionActivity: CompanionActivity? = null
-    private var inlineView: ScreenView? = null
+    private var inlineView: BottomScreen? = null
+    private val controls by lazy { Controls(this) }
     private var started = false
+    private var engineVisible = false
+    private var refreshHz = 120
+    internal val requestedRefresh: Int get() = refreshHz
+    private val screenState = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            updateVisibility()
+            refreshDisplays()
+        }
+    }
     /** The companion Activity was sent to the background on its own (Home on the bottom display); see onWindowFocusChanged. */
     private var companionLost = false
     /** Debug builds only: `am start --es companion activity|inline` skips the earlier routes to test the fallbacks. */
@@ -96,7 +112,7 @@ class MainActivity : Activity(), DisplayManager.DisplayListener, InputManager.In
         }
 
         override fun inline() {
-            val view = ScreenView(this@MainActivity, NativeBridge.BOTTOM)
+            val view = BottomScreen(this@MainActivity)
             inlineView = view
             stack.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
             Log.i(TAG, "companion route=inline")
@@ -120,9 +136,13 @@ class MainActivity : Activity(), DisplayManager.DisplayListener, InputManager.In
         })
         NativeBridge.onMessage = { text -> status.text = text; status.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE }
         NativeBridge.onGameExit = { finishAndRemoveTask() }
+        NativeBridge.onRefresh = { hz -> refreshHz = hz; refreshDisplays() }
 
         displays = getSystemService(DisplayManager::class.java)
         displays.registerDisplayListener(this, handler)
+        val filter = IntentFilter().apply { addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_SCREEN_OFF) }
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(screenState, filter, Context.RECEIVER_NOT_EXPORTED)
+        else registerReceiver(screenState, filter)
         getSystemService(InputManager::class.java).registerInputDeviceListener(this, handler)
         startEngine()
     }
@@ -145,12 +165,15 @@ class MainActivity : Activity(), DisplayManager.DisplayListener, InputManager.In
         super.onStart()
         started = true
         companionLost = false
-        NativeBridge.nativeResume()
+        updateVisibility()
         refreshDisplays()
     }
 
     override fun onStop() {
         started = false
+        controls.close()
+        engineVisible = false
+        RefreshPolicy.clear(window)
         NativeBridge.nativePause()
         NativeBridge.nativeResetInput()
         router.stop() // closes the bottom window; its Surface is reported lost before the engine resumes
@@ -159,26 +182,48 @@ class MainActivity : Activity(), DisplayManager.DisplayListener, InputManager.In
 
     override fun onDestroy() {
         displays.unregisterDisplayListener(this)
+        unregisterReceiver(screenState)
         getSystemService(InputManager::class.java).unregisterInputDeviceListener(this)
         NativeBridge.onMessage = null
         NativeBridge.onGameExit = null
+        NativeBridge.onRefresh = null
         if (current === this) current = null
         if (isFinishing) NativeBridge.nativeStop()
         super.onDestroy()
+        // The native game and its GL objects have process lifetime; the next launch starts a fresh engine.
+        if (isFinishing) android.os.Process.killProcess(android.os.Process.myPid())
     }
 
     /** Re-evaluates which display shows the bottom screen (start, hot-plug, a lost Presentation). */
     private fun refreshDisplays() {
-        if (!started || companionLost) return
+        updateVisibility()
+        if (!engineVisible || companionLost) return
         val own = activityDisplay
-        RefreshPolicy.request(window, own, 120)
-        presentation?.let { RefreshPolicy.request(it.window!!, it.display, 60) }
-        companionActivity?.let { RefreshPolicy.request(it.window, it.activityDisplay, 60) }
+        NativeBridge.nativeDisplayRate(own?.refreshRate ?: 60f)
+        RefreshPolicy.request(window, own, refreshHz)
+        // Thor firmware can apply the focused companion's vote to the top panel after sleep.
+        presentation?.let { RefreshPolicy.request(it.window!!, it.display, refreshHz) }
+        companionActivity?.let { RefreshPolicy.request(it.window, it.activityDisplay, refreshHz) }
         val usable = displays.displays
             .filter { it.isValid && it.state == Display.STATE_ON && it.flags and Display.FLAG_PRIVATE == 0 }
             .map { it.displayId }
         router.reconcile(own?.displayId, usable)
         Log.i(TAG, "displays top=${own?.displayId} ${own?.mode?.physicalWidth}x${own?.mode?.physicalHeight} usable=$usable route=${router.mode}")
+    }
+
+    /** A closed lid can power off the display before Android stops the Activity. */
+    private fun updateVisibility() {
+        val visible = started && getSystemService(PowerManager::class.java).isInteractive &&
+            activityDisplay?.state == Display.STATE_ON
+        if (visible == engineVisible) return
+        engineVisible = visible
+        if (visible) NativeBridge.nativeResume()
+        else {
+            RefreshPolicy.clear(window)
+            NativeBridge.nativePause()
+            controls.reset()
+            router.stop()
+        }
     }
 
     internal fun attachCompanion(activity: CompanionActivity, generation: Long): Boolean {
@@ -228,13 +273,55 @@ class MainActivity : Activity(), DisplayManager.DisplayListener, InputManager.In
     override fun onInputDeviceChanged(deviceId: Int) {}
     override fun onInputDeviceRemoved(deviceId: Int) {
         Log.i(TAG, "input device removed $deviceId")
-        NativeBridge.nativeResetInput() // a button held on a pulled controller would stay down
+        controls.reset() // a button held on a pulled controller would stay down
     }
 
     // The companion window forwards its keys here: a touch on the other display moves focus to it.
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action != KeyEvent.ACTION_MULTIPLE && NativeBridge.nativeKey(event.keyCode, event.action == KeyEvent.ACTION_DOWN)) return true
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            if (event.action == KeyEvent.ACTION_UP) showAndroidMenu()
+            return true
+        }
+        if (event.action != KeyEvent.ACTION_MULTIPLE && controls.key(event.keyCode, event.action == KeyEvent.ACTION_DOWN)) return true
         return super.dispatchKeyEvent(event)
+    }
+
+    private fun showAndroidMenu() {
+        controls.reset()
+        AlertDialog.Builder(this).setTitle("Emerald 3DS for Thor")
+            .setItems(arrayOf("Controller buttons", "Import game data pack")) { _, which ->
+                if (which == 0) controls.show()
+                else {
+                    @Suppress("DEPRECATION")
+                    startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "*/*"
+                    }, 1)
+                }
+            }.setNegativeButton("Return to game", null).show()
+    }
+
+    @Deprecated("Uses the Activity result API available on all supported Android versions")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != 1 || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        NativeBridge.showMessage("Importing game data...")
+        thread(name = "PackImport") {
+            val error = runCatching {
+                val folder = (getExternalFilesDir(null) ?: filesDir).resolve("emerald3ds")
+                PackImport.install(contentResolver.openInputStream(uri) ?: error("The file could not be opened."), folder)
+            }.exceptionOrNull()
+            handler.post {
+                if (isFinishing || isDestroyed) return@post
+                NativeBridge.showMessage("")
+                if (error != null) AlertDialog.Builder(this).setTitle("Import failed")
+                    .setMessage(error.message).setPositiveButton("OK", null).show()
+                else AlertDialog.Builder(this).setTitle("Game data imported")
+                    .setMessage("Close and reopen Emerald 3DS to use this pack. Your save and settings are kept.")
+                    .setPositiveButton("Close app") { _, _ -> finishAndRemoveTask() }.show()
+            }
+        }
     }
 
     override fun onGenericMotionEvent(event: MotionEvent): Boolean {
@@ -242,11 +329,13 @@ class MainActivity : Activity(), DisplayManager.DisplayListener, InputManager.In
             return super.onGenericMotionEvent(event)
         fun axis(a: Int) = event.getAxisValue(a)
         fun larger(a: Float, b: Float) = if (abs(a) >= abs(b)) a else b
+        controls.motion(axis(MotionEvent.AXIS_HAT_X), axis(MotionEvent.AXIS_HAT_Y),
+            maxOf(axis(MotionEvent.AXIS_LTRIGGER), axis(MotionEvent.AXIS_BRAKE)),
+            maxOf(axis(MotionEvent.AXIS_RTRIGGER), axis(MotionEvent.AXIS_GAS)))
         NativeBridge.nativeMotion(
             axis(MotionEvent.AXIS_X), axis(MotionEvent.AXIS_Y),
             larger(axis(MotionEvent.AXIS_Z), axis(MotionEvent.AXIS_RX)), larger(axis(MotionEvent.AXIS_RZ), axis(MotionEvent.AXIS_RY)),
-            axis(MotionEvent.AXIS_HAT_X), axis(MotionEvent.AXIS_HAT_Y),
-            maxOf(axis(MotionEvent.AXIS_LTRIGGER), axis(MotionEvent.AXIS_BRAKE)), maxOf(axis(MotionEvent.AXIS_RTRIGGER), axis(MotionEvent.AXIS_GAS)),
+            0f, 0f, 0f, 0f,
         )
         return true
     }

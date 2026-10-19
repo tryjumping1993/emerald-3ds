@@ -15,6 +15,10 @@ WAV2AGB := $(abspath $(ROOT)/tools/wav2agb/wav2agb$(EXESUFFIX))
 SCANINC := $(abspath $(ROOT)/tools/scaninc/scaninc$(EXESUFFIX))
 GAME_ARCH ?= $(ARCH)
 ASM_PSEUDO_OP_CONV ?= sed -e 's/\.4byte/\.int/g;s/\.2byte/\.short/g'
+# GNU make predefines AS=as; that host assembler cannot assemble ARM data.
+ifeq ($(origin AS),default)
+AS := $(DEVKITARM)/bin/arm-none-eabi-as
+endif
 AS ?= $(DEVKITARM)/bin/arm-none-eabi-as
 CPPTOOL ?= $(DEVKITARM)/bin/arm-none-eabi-cpp
 ASFLAGS ?= -mcpu=mpcore --defsym MODERN=1 --defsym PORTABLE=1 --defsym UBFIX=1 -I$(ROOT)

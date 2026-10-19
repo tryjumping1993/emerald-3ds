@@ -27,6 +27,7 @@ import voxel_building_specs as specs  # noqa: E402
 
 LAYOUT = "LAYOUT_RUSTBORO_CITY"
 SOURCES = ["src/voxel/voxel_building.c", "src/voxel/voxel_grade.c", "src/3ds_video_decode.c"]
+TEXEL_ORDER = os.environ.get("CTR_TEXEL_ORDER", "morton")
 
 
 def build(cc, tmp, path):
@@ -34,7 +35,7 @@ def build(cc, tmp, path):
     subprocess.run([cc, "-std=c99", "-O2", "-Wall", "-Wextra", "-Werror", "-Iinclude", "-Isrc/voxel",
                     "-iquote", "../include", "-D_GNU_SOURCE", "-DPORT_LOG(...)=((void)0)",
                     "-DVOXEL_HOST_FILES", '-DVOXEL_BUILDINGS_PATH="%s"' % path.as_posix(),
-                    "tests/voxel_building_anim_test.c"] + SOURCES + ["-lm", "-o", str(exe)],
+                    "tests/voxel_building_anim_test.c"] + (["-DPLATFORM_ANDROID"] if TEXEL_ORDER == "rows" else []) + SOURCES + ["-lm", "-o", str(exe)],
                    cwd=ROOT, check=True)
     return exe
 
@@ -128,6 +129,8 @@ def page_image(blob, page, patch):
 
 
 def texel_offset(x, y, width):
+    if TEXEL_ORDER == "rows":
+        return ((y // 8) * (width // 8) + x // 8) * 64 + (y % 8) * 8 + x % 8
     morton = 0
     for bit in range(3):
         morton |= ((x >> bit) & 1) << (2 * bit) | ((y >> bit) & 1) << (2 * bit + 1)

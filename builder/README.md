@@ -18,6 +18,18 @@ python -m emerald3ds_builder detect
 `DIR` is a release's `payload/` folder (executable, `emerald3ds.recipe`,
 `voxelgen/`); by default the builder looks next to itself.
 
+For Thor, choose **thor** in the window, or add `--target thor` to
+`build`, `install` or `verify`. The release payload must contain
+`android/Emerald3DS-Thor.apk` and `android/emerald3ds.recipe`; localized
+variants live under `android/es`, `android/fr` or `android/it`. Generators
+are shared in `voxelgen/`, but Thor generates row-ordered texture tiles.
+The output folder is `emerald3ds/`. Install the APK and import the pack
+through its Android Back menu; see [installation](../docs/THOR_INSTALLATION.md).
+
+Web callers pass `target="thor"` to `build_pack_for_web` or `run_web_build`.
+Manifest variants with `platform: "thor"` carry `apk` and `recipe` assets;
+an omitted platform continues to mean `3ds`. A ROM may occur once per target.
+
 | Module | Role |
 |---|---|
 | `rom.py` | recognises the supported ROM |

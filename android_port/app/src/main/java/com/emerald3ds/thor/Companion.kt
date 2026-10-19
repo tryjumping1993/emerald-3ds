@@ -15,8 +15,8 @@ import android.view.MotionEvent
 class CompanionPresentation(private val owner: MainActivity, display: Display) : Presentation(owner, display) {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window?.let { it.immerse(); RefreshPolicy.request(it, display, 60) }
-        setContentView(ScreenView(context, NativeBridge.BOTTOM))
+        window?.let { it.immerse(); RefreshPolicy.request(it, display, owner.requestedRefresh) }
+        setContentView(BottomScreen(context))
         Log.i(TAG, "companion route=presentation display=${display.displayId}")
     }
 
@@ -35,8 +35,8 @@ class CompanionActivity : Activity() {
             return
         }
         window.immerse()
-        RefreshPolicy.request(window, activityDisplay, 60)
-        setContentView(ScreenView(this, NativeBridge.BOTTOM))
+        RefreshPolicy.request(window, activityDisplay, owner.requestedRefresh)
+        setContentView(BottomScreen(this))
     }
 
     // Home on the bottom display backgrounds this window while the game still runs: MainActivity brings it back.

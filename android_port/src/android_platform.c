@@ -36,7 +36,8 @@ void CtrPlatform_ShowDataError(const char *title, const char *detail)
     char text[1024];
 
     CtrLog_Write(CTR_LOG_ERROR, "data error: %s: %s", title, detail);
-    snprintf(text, sizeof(text), "Emerald 3DS\n\n%s\n\n%s\n\nPress START to exit.", title, detail ? detail : "");
+    snprintf(text, sizeof(text), "Emerald 3DS\n\n%s\n\n%s\n\nData folder:\n%s\n\nUse the Thor builder's matching emerald3ds.pak.\nPress Android Back to import it, or START to exit.",
+             title, detail ? detail : "", AndroidHost_ExternalDir());
     Park(text);
 }
 

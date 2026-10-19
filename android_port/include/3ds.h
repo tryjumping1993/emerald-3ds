@@ -50,7 +50,7 @@ void osSetSpeedupEnable(bool enable);
 bool osGetSpeedupEnable(void);
 
 /* ── Locks, events, threads ──────────────────────────────────────────────── */
-typedef s32 LightLock;
+typedef s32 LightLock; /* libctru: 1 is unlocked, including static initializers */
 void LightLock_Init(LightLock *lock);
 void LightLock_Lock(LightLock *lock);
 void LightLock_Unlock(LightLock *lock);

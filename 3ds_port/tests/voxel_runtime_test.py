@@ -169,7 +169,9 @@ static unsigned RunJobs(uint64_t a, float holes, float ahead, bool inFrame, bool
     source += function(voxel, 'void CtrVoxel_NoteFrameWait(')
     source += function(voxel, 'void CtrVoxel_AfterSubmit(')
     source += function(voxel, 'static void JobStep(')
-    source += function(video, 'bool CtrVideo_TryVoxelUpload(')
+    # This harness exercises the console's GX queue; the Android implementation precedes it.
+    console_video = video[video.index('#else', video.index('#define ANDROID_UPLOAD_COPIES')):]
+    source += function(console_video, 'bool CtrVideo_TryVoxelUpload(')
     begin = voxel.index('    /* Cancel first, then mark the surviving request consumed. */')
     end = voxel.index('    sHolesOnly = !warmup;', begin)
     source += 'static void Refresh(bool holes) {\n' + voxel[begin:end] + '}\n'

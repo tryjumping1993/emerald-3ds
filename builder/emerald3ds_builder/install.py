@@ -34,7 +34,7 @@ def find_sd_cards() -> list[Path]:
     return candidates
 
 
-def install(sd_root: Path, files: dict[str, Path], progress=None) -> Path:
+def install(sd_root: Path, files: dict[str, Path], progress=None, target: str = "3ds") -> Path:
     """Copy `files` ({name: source}) into <sd_root>/3ds/emerald3ds/.
 
     Each file is written under a temporary name first and renamed into place,
@@ -42,7 +42,9 @@ def install(sd_root: Path, files: dict[str, Path], progress=None) -> Path:
     sd_root = Path(sd_root)
     if not sd_root.is_dir():
         raise BuilderError("The destination folder does not exist:\n%s" % sd_root)
-    dest = sd_root / APP_DIR
+    if target not in ("3ds", "thor"):
+        raise ValueError("unknown target %r" % target)
+    dest = sd_root / (APP_DIR if target == "3ds" else Path("emerald3ds"))
     need = sum(src.stat().st_size for src in files.values())
     try:
         free = shutil.disk_usage(sd_root).free

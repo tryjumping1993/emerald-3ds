@@ -71,9 +71,10 @@ def script_command(script: Path, args: list[str]) -> list[str]:
     return [sys.executable, "-B", "-m", "emerald3ds_builder", "--run-script", str(script)] + args
 
 
-def run_step_subprocess(script: Path, args: list[str], cwd: Path) -> None:
+def run_step_subprocess(script: Path, args: list[str], cwd: Path, texel_order: str = "morton") -> None:
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["CTR_TEXEL_ORDER"] = texel_order
     here = Path(__file__).resolve().parent.parent
     env["PYTHONPATH"] = str(here) + os.pathsep + env.get("PYTHONPATH", "")
     result = subprocess.run(script_command(script, args), cwd=str(cwd), env=env, capture_output=True, text=True,
@@ -83,18 +84,20 @@ def run_step_subprocess(script: Path, args: list[str], cwd: Path) -> None:
                            (result.stderr or result.stdout)[-1500:], code="generator_failed")
 
 
-def run_step_inprocess(script: Path, args: list[str], cwd: Path) -> None:
+def run_step_inprocess(script: Path, args: list[str], cwd: Path, texel_order: str = "morton") -> None:
     scripts_dir = script.parent
     siblings = {p.stem for p in scripts_dir.glob("*.py")}
     saved_argv, saved_path, saved_cwd = sys.argv[:], sys.path[:], os.getcwd()
     saved_modules = {name: sys.modules.pop(name) for name in list(sys.modules) if name in siblings}
     saved_bytecode = sys.dont_write_bytecode
+    saved_order = os.environ.get("CTR_TEXEL_ORDER")
     output = io.StringIO()
     failure = None
     try:
         sys.argv = [str(script)] + list(args)
         sys.path.insert(0, str(scripts_dir))
         sys.dont_write_bytecode = True
+        os.environ["CTR_TEXEL_ORDER"] = texel_order
         os.chdir(str(cwd))
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
             runpy.run_path(str(script), run_name="__main__")
@@ -110,6 +113,10 @@ def run_step_inprocess(script: Path, args: list[str], cwd: Path) -> None:
         sys.argv = saved_argv
         sys.path[:] = saved_path
         sys.dont_write_bytecode = saved_bytecode
+        if saved_order is None:
+            os.environ.pop("CTR_TEXEL_ORDER", None)
+        else:
+            os.environ["CTR_TEXEL_ORDER"] = saved_order
         for name in [n for n in sys.modules if n in siblings]:
             del sys.modules[name]
         sys.modules.update(saved_modules)
@@ -119,7 +126,8 @@ def run_step_inprocess(script: Path, args: list[str], cwd: Path) -> None:
 
 
 def run_generators(tree: Path, voxelgen: Path, expected: list[dict], progress=None,
-                   runner: str = "subprocess", timings: list | None = None) -> dict[str, bytes]:
+                   runner: str = "subprocess", timings: list | None = None,
+                   texel_order: str = "morton") -> dict[str, bytes]:
     """Run the steps and check their outputs.
 
     progress(fraction, detail) is told when each step starts and how long it
@@ -128,6 +136,8 @@ def run_generators(tree: Path, voxelgen: Path, expected: list[dict], progress=No
     their own output is captured."""
     if runner not in RUNNERS:
         raise ValueError("unknown generator runner %r" % runner)
+    if texel_order not in ("morton", "rows"):
+        raise ValueError("unknown texel order %r" % texel_order)
     run_step = run_step_inprocess if runner == "inprocess" else run_step_subprocess
     if not voxelgen.is_dir():
         raise BuilderError("The release is incomplete: payload/voxelgen is missing.", code="payload_incomplete")
@@ -143,7 +153,7 @@ def run_generators(tree: Path, voxelgen: Path, expected: list[dict], progress=No
         script, args, _ = steps[i]
         start = time.perf_counter()
         run_step(port / "scripts" / script,
-                 [a if not a.startswith("3ds_port/") else str(tree / a) for a in args], port)
+                 [a if not a.startswith("3ds_port/") else str(tree / a) for a in args], port, texel_order=texel_order)
         return time.perf_counter() - start
 
     took: dict[int, float] = {}

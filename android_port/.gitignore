@@ -6,6 +6,8 @@ host_test/build/
 local.properties
 captures/
 *.apk
+*.jks
+*.keystore
 
 # Engine files staged by `make apk-files` (android_port/Makefile): a build output.
 app/src/main/assets/romfs/

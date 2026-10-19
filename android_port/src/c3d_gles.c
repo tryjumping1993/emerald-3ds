@@ -25,6 +25,7 @@
 #include <string.h>
 
 #include "3ds_log.h"
+#include "3ds_platform.h"
 #include "android_host.h"
 #include "citro2d.h"
 
@@ -111,6 +112,7 @@ static void ReplayFrameBegin(void);
 static void ReplayFrameEnd(void);
 static void DrawBatchNow(const BatchVertex *vertices, unsigned quads);
 static void DrawRawNow(const u8 *vertices, size_t vertexBytes, const void *indices, int count, int type);
+static void DrawVoxelElements(const u8 *vertices, unsigned stride, unsigned vertexCount, const void *indices, int count, int type);
 static void ShowTop(void);
 
 static C3D_Tex *sTextures[REGISTRY];
@@ -395,6 +397,7 @@ static GLenum WrapOf(u8 wrap)
 
 static void SetC2dEnv(void)
 {
+    G.voxelBound = false;
     G.env[0].srcRgb = G.env[0].srcAlpha = GPU_PREVIOUS;
     G.env[0].opRgb = G.env[0].opAlpha = 0;
     G.env[0].funcRgb = ENV_C2D;
@@ -1769,7 +1772,8 @@ void C3D_DrawElements(GPU_Primitive_t primitive, int count, int type, const void
     unsigned maxIndex = 0;
 
     FlushBatch();
-    if (G.skip || G.target == NULL || count <= 0 || G.bufInfo.data == NULL || primitive != GPU_TRIANGLES)
+    if (G.skip || G.target == NULL || count <= 0 || indices == NULL || G.bufInfo.data == NULL || primitive != GPU_TRIANGLES ||
+        (type != C3D_UNSIGNED_BYTE && type != C3D_UNSIGNED_SHORT))
         return;
     for (int i = 0; i < count; ++i)
     {
@@ -1777,6 +1781,11 @@ void C3D_DrawElements(GPU_Primitive_t primitive, int count, int type, const void
 
         if (index > maxIndex)
             maxIndex = index;
+    }
+    if (G.voxelBound)
+    {
+        DrawVoxelElements(G.bufInfo.data, G.bufInfo.stride, maxIndex + 1, indices, count, type);
+        return;
     }
     G.mode = G.env[0].funcRgb == ENV_C2D ? MODE_IMAGE : MODE_RAW;
     G.batchTexture = G.bound;
@@ -2571,19 +2580,16 @@ static bool ApplyVoxelState(void)
     return true;
 }
 
-void C3D_DrawArrays(GPU_Primitive_t primitive, int first, int size)
+/* Both indexed static models and streamed terrain use the voxel vertex layout and shader. */
+static int VoxelVertices(const u8 *data, unsigned stride, int first, int size)
 {
     static const GLenum glFormats[4] = { GL_BYTE, GL_UNSIGNED_BYTE, GL_SHORT, GL_FLOAT };
     static const unsigned sizes[4] = { 1, 1, 2, 4 };
-    const u8 *data = G.bufInfo.data;
-    unsigned stride = G.bufInfo.stride, offset = 0;
+    unsigned offset = 0;
     VramBlock *block;
 
-    FlushBatch();
-    if (G.skip || G.target == NULL || size <= 0 || data == NULL || stride == 0 || primitive != GPU_TRIANGLES || !G.voxelBound)
-        return;
     if (!ApplyVoxelState())
-        return;
+        return -1;
     glBindVertexArray(G.voxVao);
     block = BlockOf(data);
     if (block != NULL)
@@ -2609,7 +2615,32 @@ void C3D_DrawArrays(GPU_Primitive_t primitive, int first, int size)
         }
         offset += components * sizes[format];
     }
-    glDrawArrays(GL_TRIANGLES, block != NULL ? first : 0, size);
+    return block != NULL ? first : 0;
+}
+
+static void DrawVoxelElements(const u8 *vertices, unsigned stride, unsigned vertexCount, const void *indices, int count, int type)
+{
+    if (stride == 0 || VoxelVertices(vertices, stride, 0, (int)vertexCount) < 0)
+        return;
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, G.rawIbo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)count * (type == C3D_UNSIGNED_BYTE ? 1 : 2), indices, GL_STREAM_DRAW);
+    glDrawElements(GL_TRIANGLES, count, type == C3D_UNSIGNED_BYTE ? GL_UNSIGNED_BYTE : GL_UNSIGNED_SHORT, 0);
+    CheckError("voxel indexed draw");
+    CountDraw(G.target, true, (unsigned)count / 6);
+    glBindVertexArray(G.vao);
+    glBindBuffer(GL_ARRAY_BUFFER, G.rawVbo);
+}
+
+void C3D_DrawArrays(GPU_Primitive_t primitive, int first, int size)
+{
+    int glFirst;
+    FlushBatch();
+    if (G.skip || G.target == NULL || first < 0 || size <= 0 || G.bufInfo.data == NULL || G.bufInfo.stride == 0 || primitive != GPU_TRIANGLES || !G.voxelBound)
+        return;
+    glFirst = VoxelVertices(G.bufInfo.data, G.bufInfo.stride, first, size);
+    if (glFirst < 0)
+        return;
+    glDrawArrays(GL_TRIANGLES, glFirst, size);
     CheckError("voxel draw");
     CountDraw(G.target, true, (unsigned)size / 6);
     glBindVertexArray(G.vao);
@@ -2928,7 +2959,7 @@ bool C3D_ExtraFrame(float alpha)
     if (!R.enabled || !R.valid || G.topFbo == 0)
         return false;
     AndroidHost_GlMakeCurrent();
-    if (R.haveWorld && R.count != 0)
+    if (alpha > 0.0f && R.haveWorld && R.count != 0)
     {
         Snap saved;
         bool savedInFrame = G.inFrame;
@@ -3032,6 +3063,7 @@ void AndroidVideo_PresentExtra(void)
     presents = AndroidHost_PresentsPerTick();
 
     for (unsigned i = 1; i < presents; ++i)
-        C3D_ExtraFrame((float)i / (float)presents);
+        /* Fast-forward keeps its vsync budget but reuses the finished picture to save a world draw. */
+        C3D_ExtraFrame(CtrSettings_SpeedHalves() > 2 ? 0.0f : (float)i / (float)presents);
     R.valid = false;
 }

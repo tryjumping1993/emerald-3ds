@@ -44,12 +44,13 @@ static struct
 {
     JavaVM *vm;
     jclass bridge;
-    jmethodID showMessage, gameExited;
+    jmethodID showMessage, gameExited, requestRefresh;
 
     pthread_mutex_t lock;
     pthread_cond_t cond; /* wakes the engine (resume, exit, new surface) and nativeStop (engine done) */
     struct { ANativeWindow *window; bool dirty; } pending[SCREEN_COUNT];
     bool started, finished, paused, exitRequested, gameExitReported;
+    float displayHz; /* actual top display mode, reported by DisplayManager */
     pthread_t thread;
     char internalDir[1024], externalDir[1024];
 } g = { .lock = PTHREAD_MUTEX_INITIALIZER };
@@ -335,6 +336,13 @@ static void drawScreen(int index, const uint32_t *rgba, int w, int h)
         surfaceFailed(index, eglGetError());
         return;
     }
+    /* The compositor shares this context; none of its framebuffer or pipeline state belongs to the window blit. */
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     if (rgba != NULL)
         uploadFrame(s, rgba, w, h);
     EGLint sw = 0, sh = 0;
@@ -549,16 +557,10 @@ bool AndroidHost_TopBegin(int *width, int *height)
 
 static void applyHint(void);
 
-/*
- * Each swap of the top surface waits for a vsync, so the time between two says the panel's period. The
- * least of the last few is taken for it (a late frame lengthens one, never shortens): under 11.5 ms the panel
- * is at 120 Hz and each tick wants two pictures; over, one.
- */
+/* Swap intervals measure workload as well as vsync: use them for diagnostics, never mode selection. */
 static void noteSwap(void)
 {
-    enum { WINDOW = 24 };
-    static double last, intervals[WINDOW];
-    static unsigned count;
+    static double last;
     struct timespec now;
     double ms;
 
@@ -578,50 +580,27 @@ static void noteSwap(void)
             LOGI("top swaps: mean %.2f ms, worst %.2f ms, %u over 12 ms, %u picture(s) per tick", sum / seen, worst, late, s_presentsPerTick);
             sum = worst = 0.0; seen = late = 0;
         }
-        /* The first swaps fill the buffer queue and wait for nothing: no panel is faster than 5 ms. */
-        if (d >= 5.0)
-            intervals[count++ % WINDOW] = d;
-        if (count >= WINDOW && count % 12 == 0)
-        {
-            /* The lower quartile of the last swaps is the panel's period: a swap that waited for nothing but the vsync is
-             * as quick as the panel allows, and a stall (a map loading) only adds slow ones, never fast. */
-            double sorted[WINDOW], median;
-            unsigned wanted, class;
-            static unsigned agreed, lastClass;
-
-            memcpy(sorted, intervals, sizeof(sorted));
-            for (unsigned i = 1; i < WINDOW; ++i)
-                for (unsigned j = i; j > 0 && sorted[j - 1] > sorted[j]; --j)
-                {
-                    double t = sorted[j];
-
-                    sorted[j] = sorted[j - 1];
-                    sorted[j - 1] = t;
-                }
-            median = sorted[WINDOW / 4];
-            /* 120 Hz is two pictures a tick, 60 Hz one; any other rate (a 90 or 144 Hz panel is no multiple of the
-             * game's tick) is held to 60 by asking the system for it. Three readings in a row before it changes. */
-            class = median > 7.4 && median < 9.5 ? 2u : median > 15.0 && median < 18.5 ? 1u : 3u;
-            agreed = class == lastClass ? agreed + 1 : 1;
-            lastClass = class;
-            wanted = class == 2u ? 2u : 1u;
-            if (agreed >= 3 && wanted != s_presentsPerTick)
-            {
-                s_presentsPerTick = wanted;
-                LOGI("top swaps every %.2f ms: %u picture(s) per tick", median, wanted);
-            }
-            if (agreed >= 3 && class == 3u && !s_forceSixty)
-            {
-                s_forceSixty = true;
-                applyHint();
-                LOGI("a %.2f ms panel is no multiple of the game's tick: refresh asked at 60 Hz", median);
-            }
-        }
     }
     last = ms;
 }
 
-unsigned AndroidHost_PresentsPerTick(void) { return s_presentsPerTick; }
+unsigned AndroidHost_PresentsPerTick(void)
+{
+    static float appliedHz;
+    pthread_mutex_lock(&g.lock);
+    float hz = g.displayHz;
+    pthread_mutex_unlock(&g.lock);
+    if (hz > 0.0f && hz != appliedHz)
+    {
+        appliedHz = hz;
+        s_presentsPerTick = hz >= 118.0f && hz <= 122.0f ? 2 : 1;
+        s_forceSixty = s_presentsPerTick == 1 && (hz < 58.0f || hz > 62.0f);
+        applyHint();
+        LOGI("top display mode %.2f Hz: %u picture(s) per tick%s", hz, s_presentsPerTick,
+             s_forceSixty ? "; refresh asked at 60 Hz" : "");
+    }
+    return s_presentsPerTick;
+}
 
 /* The refresh rate asked of the system for the top surface, now and for every surface made after. */
 static void applyHint(void)
@@ -639,15 +618,32 @@ void AndroidHost_SetRefreshHint(int hz)
         return;
     s_refreshHint = hz;
     applyHint();
+    callBridge(g.requestRefresh, hz == 60 ? "60" : "120");
 }
 
 void AndroidHost_TopEnd(void)
 {
+    static int64_t nextFallback;
     Screen *s = &s_screen[SCREEN_TOP];
     if (s->surface != EGL_NO_SURFACE && !eglSwapBuffers(s_display, s->surface))
         surfaceFailed(SCREEN_TOP, eglGetError());
     else
         noteSwap();
+    /* A panel that refuses the 60 Hz request must not run game logic at 90/144 ticks a second. */
+    if (s_forceSixty)
+    {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        int64_t ns = (int64_t)now.tv_sec * 1000000000LL + now.tv_nsec;
+        if (nextFallback > ns && nextFallback - ns <= 16666667LL)
+        {
+            struct timespec deadline = { nextFallback / 1000000000LL, nextFallback % 1000000000LL };
+            clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &deadline, NULL);
+            ns = nextFallback;
+        }
+        nextFallback = ns + 16666667LL;
+    }
+    else nextFallback = 0;
 }
 
 void AndroidHost_PresentTop(const uint32_t *rgba, int width, int height) { present(SCREEN_TOP, rgba, width, height); }
@@ -680,14 +676,25 @@ bool AndroidHost_ExitRequested(void)
     return exit;
 }
 
+/* The self-test host has no audio backend. Real builds suspend the AAudio callback as well as the game. */
+void AndroidEngine_SetPaused(bool paused) __attribute__((weak));
+
 bool AndroidHost_WaitWhilePaused(void)
 {
+    static bool audioPaused;
     for (;;)
     {
         applyPending(); /* a surface lost while paused must not stay held until the next resume */
         pthread_mutex_lock(&g.lock);
-        bool exit = g.exitRequested, paused = g.paused;
+        bool exit = g.exitRequested, paused = g.paused || s_screen[SCREEN_TOP].surface == EGL_NO_SURFACE;
         bool surfaceChanged = g.pending[SCREEN_TOP].dirty || g.pending[SCREEN_BOTTOM].dirty;
+        if (paused != audioPaused)
+        {
+            pthread_mutex_unlock(&g.lock);
+            audioPaused = paused;
+            if (AndroidEngine_SetPaused != NULL) AndroidEngine_SetPaused(paused);
+            continue;
+        }
         if (!exit && paused && !surfaceChanged)
             pthread_cond_wait(&g.cond, &g.lock);
         pthread_mutex_unlock(&g.lock);
@@ -815,7 +822,8 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved)
     g.bridge = (*env)->NewGlobalRef(env, bridge);
     g.showMessage = (*env)->GetStaticMethodID(env, bridge, "showMessage", "(Ljava/lang/String;)V");
     g.gameExited = (*env)->GetStaticMethodID(env, bridge, "gameExited", "()V");
-    if (g.showMessage == NULL || g.gameExited == NULL)
+    g.requestRefresh = (*env)->GetStaticMethodID(env, bridge, "requestRefresh", "(Ljava/lang/String;)V");
+    if (g.showMessage == NULL || g.gameExited == NULL || g.requestRefresh == NULL)
         return JNI_ERR;
     /* Waits in nativeStop use a monotonic clock so a wall-clock change cannot stretch them. */
     pthread_condattr_t attr;
@@ -876,6 +884,15 @@ JNIEXPORT void JNICALL Java_com_emerald3ds_thor_NativeBridge_nativeSurfaceSize(J
     (void)cls;
     /* The engine reads the real size from the EGL surface; this is for the log only. */
     LOGI("%s view size %dx%d", screen == SCREEN_TOP ? "top" : "bottom", width, height);
+}
+
+JNIEXPORT void JNICALL Java_com_emerald3ds_thor_NativeBridge_nativeDisplayRate(JNIEnv *env, jclass cls, jfloat hz)
+{
+    (void)env;
+    (void)cls;
+    pthread_mutex_lock(&g.lock);
+    g.displayHz = hz;
+    pthread_mutex_unlock(&g.lock);
 }
 
 JNIEXPORT void JNICALL Java_com_emerald3ds_thor_NativeBridge_nativePause(JNIEnv *env, jclass cls)

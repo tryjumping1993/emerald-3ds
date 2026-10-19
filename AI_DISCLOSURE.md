@@ -2,6 +2,8 @@
 
 AI-assisted development tools have been used during the development of this
 project for implementation, debugging, refactoring, testing and documentation.
+The Thor launcher's Rayquaza fan artwork was generated with ImageGen. Its
+provenance and final art prompt are recorded in `android_port/ICON.md`.
 
 AI-generated or AI-assisted changes are reviewed and tested by the maintainer
 before being accepted into the project. The repository intentionally does not

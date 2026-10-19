@@ -39,6 +39,14 @@ class Payload:
     player's ROM."""
     root: Path
     shared: Path | None = None   # the payload/ folder, for a language subfolder
+    platform: str = "3ds"
+
+    def __post_init__(self):
+        if self.platform not in ("3ds", "thor"):
+            raise ValueError("unknown target %r" % self.platform)
+        if self.platform == "thor" and self.shared is None:
+            self.shared = self.root
+            self.root = self.root / "android"
 
     @property
     def recipe(self) -> Path:
@@ -51,10 +59,12 @@ class Payload:
     def variants(self) -> list["Payload"]:
         """The default variant first, then every language subfolder."""
         base = self.shared or self.root
-        if not base.is_dir():
-            return [Payload(base)]
-        subs = sorted(p for p in base.iterdir() if p.is_dir() and (p / RECIPE_NAME).is_file())
-        return [Payload(base)] + [Payload(p, base) for p in subs]
+        folder = base / "android" if self.platform == "thor" else base
+        shared = base if self.platform == "thor" else None
+        if not folder.is_dir():
+            return [Payload(folder, shared, self.platform)]
+        subs = sorted(p for p in folder.iterdir() if p.is_dir() and p.name != "android" and (p / RECIPE_NAME).is_file())
+        return [Payload(folder, shared, self.platform)] + [Payload(p, base, self.platform) for p in subs]
 
     def for_rom(self, sha1: str) -> "Payload":
         """The variant whose recipe was made from this ROM (self when none is)."""
@@ -67,7 +77,8 @@ class Payload:
         return self
 
     def executables(self) -> list[Path]:
-        return [self.root / name for name in EXECUTABLE_NAMES]
+        names = ("Emerald3DS-Thor.apk",) if self.platform == "thor" else EXECUTABLE_NAMES
+        return [self.root / name for name in names]
 
     def check(self, need_executables: bool = True) -> None:
         missing = [p.name for p in ([self.recipe] + (self.executables() if need_executables else []))
@@ -148,7 +159,7 @@ def build_pack(rom_path: Path, payload: Payload, out_pak: Path, progress=None,
             timings.append(("tree", time.perf_counter() - start))
             outputs = run_generators(work, payload.voxelgen, recipe.generated,
                                      report.span(0.6, 0.9, "Generating the 3D scenery"), runner=runner,
-                                     timings=timings)
+                                     timings=timings, texel_order="rows" if payload.platform == "thor" else "morton")
             files.update(outputs)
         finally:
             if not keep_workdir:

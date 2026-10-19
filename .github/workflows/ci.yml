@@ -41,6 +41,11 @@ jobs:
           cd 3ds_port
           gcc -std=c99 -O2 -Wall -Wextra -Werror -Iinclude tests/input_test.c src/3ds_input_decode.c -o input_test && ./input_test
           gcc -std=c99 -O2 -Wall -Wextra -Werror -Iinclude tests/video_decode_test.c src/3ds_video_decode.c -o video_test && ./video_test
+          gcc -std=c99 -O2 -Wall -Wextra -Werror -DPLATFORM_ANDROID -Iinclude tests/video_decode_test.c src/3ds_video_decode.c -o rows_test && ./rows_test
+      - name: GLES indexed models and compositor routing
+        run: |
+          python android_port/tests/gles_draw_test.py --cc gcc
+          python android_port/tests/shim_lock_test.py --cc gcc
       - name: Day/night clock and lighting
         run: make -C 3ds_port verify-daynight verify-clock-store verify-encounters verify-night-lamps
       - name: Standalone voxel shadows and mesh fixtures
@@ -87,3 +92,53 @@ jobs:
         with:
           name: emerald3ds-engine
           path: ship/
+
+  build-thor:
+    runs-on: windows-latest
+    steps:
+      - name: Keep shell scripts in LF format
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Android NDK and platform
+        run: sdkmanager "ndk;27.3.13750724" "platforms;android-35" "build-tools;35.0.0"
+      - uses: msys2/setup-msys2@v2
+        id: msys
+        with:
+          msystem: UCRT64
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-libpng
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-arm-none-eabi-binutils
+      - name: Bootstrap and generate game inputs
+        shell: pwsh
+        run: |
+          python -m pip install Pillow
+          $env:MSYS2_ROOT = '${{ steps.msys.outputs.msys2-location }}'
+          $env:PATH = "$env:MSYS2_ROOT\ucrt64\bin;$env:MSYS2_ROOT\usr\bin;$env:ANDROID_HOME\ndk\27.3.13750724\prebuilt\windows-x86_64\bin;$env:PATH"
+          python tools/bootstrap.py
+          make -C build/upstream -j4 tools generated PYTHON=python
+      - name: Build engine-only APK
+        shell: pwsh
+        run: |
+          python tools/thor_dev.py build --msys '${{ steps.msys.outputs.msys2-location }}' --jobs 4
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Copy-Item android_port/app/build/outputs/apk/debug/app-debug.apk build/Emerald3DS-Thor.apk
+          python tools/release_audit.py --apk build/Emerald3DS-Thor.apk --strict
+      - name: Pack import checks
+        shell: pwsh
+        run: |
+          cd android_port
+          ./gradlew.bat testDebugUnitTest "-Pemerald3dsLib=${{ github.workspace }}/build/android-out/lib" "-Pemerald3dsAssets=${{ github.workspace }}/build/android-assets"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: emerald3ds-thor-development
+          path: build/Emerald3DS-Thor.apk

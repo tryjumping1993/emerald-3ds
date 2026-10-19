@@ -74,14 +74,19 @@ def _rom(rom, where: str) -> None:
         raise ManifestError("%s.name must be a string" % where)
 
 
-def rom_variants(manifest: dict) -> list[dict]:
+def rom_variants(manifest: dict, platform: str | None = None) -> list[dict]:
     """Every ROM the release builds from, default variant first:
     [{"rom": {...}, "dataAbi": "...", "assets": {...}}]."""
-    out = [{"rom": rom, "dataAbi": manifest["dataAbi"], "assets": manifest["assets"]}
+    out = [{"rom": rom, "dataAbi": manifest["dataAbi"], "assets": manifest["assets"], "platform": "3ds"}
            for rom in manifest["supportedRoms"]]
     for variant in manifest.get("variants") or []:
-        out.append({"rom": variant["rom"], "dataAbi": variant["dataAbi"], "assets": variant["assets"]})
-    return out
+        out.append({"rom": variant["rom"], "dataAbi": variant["dataAbi"], "assets": variant["assets"],
+                    "platform": variant.get("platform", "3ds")})
+    return [v for v in out if platform is None or v["platform"] == platform]
+
+
+def asset_keys(platform: str) -> tuple[str, ...]:
+    return ("apk", "recipe") if platform == "thor" else ("threeDsx", "smdh", "recipe")
 
 
 def validate(manifest: dict) -> dict:
@@ -113,15 +118,18 @@ def validate(manifest: dict) -> dict:
             if not isinstance(variant, dict):
                 raise ManifestError("%s must be an object" % where)
             _rom(variant.get("rom"), where + ".rom")
+            platform = variant.get("platform", "3ds")
+            if platform not in ("3ds", "thor"):
+                raise ManifestError("%s.platform must be 3ds or thor" % where)
             if not isinstance(variant.get("dataAbi"), str) or not _HEX["abi"].match(variant["dataAbi"]):
                 raise ManifestError("%s.dataAbi must be 8 lowercase hex digits" % where)
             if not isinstance(variant.get("assets"), dict):
                 raise ManifestError("%s.assets must be an object" % where)
-            for key in ("threeDsx", "smdh", "recipe"):
+            for key in asset_keys(platform):
                 _file_ref(variant["assets"].get(key), "%s.assets.%s" % (where, key), need_release_asset=True)
-        shas = [v["rom"]["sha1"] for v in rom_variants(manifest)]
+        shas = [(v["platform"], v["rom"]["sha1"]) for v in rom_variants(manifest)]
         if len(set(shas)) != len(shas):
-            raise ManifestError("a ROM is listed by more than one variant")
+            raise ManifestError("a ROM is listed by more than one variant for the same platform")
     entry = manifest.get("entrypoint")
     if not isinstance(entry, dict) or not all(isinstance(entry.get(k), str) for k in ("pythonPath", "module", "function")):
         raise ManifestError("entrypoint must name pythonPath, module and function")
@@ -148,7 +156,7 @@ def validate(manifest: dict) -> dict:
             raise ManifestError("files may not contain %s" % item["path"])
         seen.add(item["path"])
     for i, variant in enumerate(rom_variants(manifest)):
-        for key in ("threeDsx", "smdh", "recipe"):
+        for key in asset_keys(variant["platform"]):
             if variant["assets"][key]["path"] not in seen:
                 raise ManifestError("the %s of ROM %s is not in files" % (key, variant["rom"]["sha1"]))
     return manifest

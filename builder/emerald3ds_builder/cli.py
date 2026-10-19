@@ -29,8 +29,8 @@ def _progress(fraction: float, message: str) -> None:
 
 
 def cmd_build(args) -> int:
-    payload = Payload(args.payload)
-    out_dir = Path(args.output) / APP_DIR
+    payload = Payload(args.payload, platform=args.target)
+    out_dir = Path(args.output) / (APP_DIR if args.target == "3ds" else Path("emerald3ds"))
     out_dir.mkdir(parents=True, exist_ok=True)
     info = build_pack(Path(args.rom), payload, out_dir / "emerald3ds.pak", _progress, args.keep_workdir)
     print("Times (%s): %s" % (info["rom"], ", ".join("%s %.1f s" % t for t in info["timings"])))
@@ -43,12 +43,15 @@ def cmd_build(args) -> int:
         f = info["followers"]
         print("Followers: %d sprites, %d texts (%d downloaded)%s" % (f["sprites"], f.get("texts", 0), f["downloaded"],
               ", %d not available" % len(f["missing"]) if f["missing"] else ""))
-    print("Copy the folder %s to the root of your SD card." % (Path(args.output) / "3ds"))
+    if args.target == "thor":
+        print("Install the APK, then import emerald3ds.pak in the app (see docs/THOR_INSTALLATION.md).")
+    else:
+        print("Copy the folder %s to the root of your SD card." % (Path(args.output) / "3ds"))
     return 0
 
 
 def cmd_install(args) -> int:
-    payload = Payload(args.payload)
+    payload = Payload(args.payload, platform=args.target)
     payload.check()
     sd = Path(args.sd)
     with tempfile.TemporaryDirectory(prefix="emerald3ds-") as tmp:
@@ -56,13 +59,13 @@ def cmd_install(args) -> int:
         info = build_pack(Path(args.rom), payload, pak_path, _progress)
         files = {exe.name: exe for exe in info["payload"].executables()}
         files["emerald3ds.pak"] = pak_path
-        dest = install(sd, files, lambda f: _progress(f, "Copying to the SD card"))
+        dest = install(sd, files, lambda f: _progress(f, "Copying to the destination"), target=args.target)
     print("Installed to %s" % dest)
     return 0
 
 
 def cmd_verify(args) -> int:
-    payload = Payload(args.payload)
+    payload = Payload(args.payload, platform=args.target)
     with pak.PakReader(Path(args.pak)) as reader:
         # The pack names the ROM it was built from: check it against that variant.
         recipe = Recipe.load(payload.for_rom(reader.rom_sha1.hex()).recipe)
@@ -102,11 +105,14 @@ def main(argv=None) -> int:
     b.add_argument("--rom", required=True)
     b.add_argument("--output", required=True)
     b.add_argument("--keep-workdir", action="store_true", help=argparse.SUPPRESS)
+    b.add_argument("--target", choices=("3ds", "thor"), default="3ds")
     i = sub.add_parser("install", help="install straight onto an SD card")
     i.add_argument("--rom", required=True)
     i.add_argument("--sd", required=True)
+    i.add_argument("--target", choices=("3ds", "thor"), default="3ds")
     v = sub.add_parser("verify", help="check a data pack against this release")
     v.add_argument("--pak", required=True)
+    v.add_argument("--target", choices=("3ds", "thor"), default="3ds")
     sub.add_parser("detect", help="list SD cards that look like a 3DS card")
     args = ap.parse_args(argv)
     try:

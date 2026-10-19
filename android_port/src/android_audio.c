@@ -44,6 +44,14 @@ static int32_t sDeviceRate = 48000;
 bool CtrAudio_Available(void) { return sReady; }
 CtrAudioStats *CtrAudio_Stats(void) { return &sStats; }
 
+/* Engine thread only: closing the lid must not leave the low-latency callback running. */
+void AndroidEngine_SetPaused(bool paused)
+{
+    if (sStream == NULL || !sReady) return;
+    if (paused) AAudioStream_requestPause(sStream);
+    else AAudioStream_requestStart(sStream);
+}
+
 static float DriftedRate(uint32_t depth)
 {
     float perFrame = (float)(CTR_AUDIO_SAMPLE_RATE / 60);

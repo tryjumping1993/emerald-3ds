@@ -48,7 +48,8 @@ float osGet3DSliderState(void) { return 0.0f; }
 
 /* ── Locks and events ────────────────────────────────────────────────────── */
 
-void LightLock_Init(LightLock *lock) { *lock = 0; }
+/* libctru permits static initialization with 1 (e.g. the settings saver). */
+void LightLock_Init(LightLock *lock) { *lock = 1; }
 
 void LightLock_Lock(LightLock *lock)
 {
@@ -57,9 +58,9 @@ void LightLock_Lock(LightLock *lock)
 
     for (;;)
     {
-        s32 expected = 0;
+        s32 expected = 1;
 
-        if (atomic_compare_exchange_weak_explicit(word, &expected, 1, memory_order_acquire, memory_order_relaxed))
+        if (atomic_compare_exchange_weak_explicit(word, &expected, 0, memory_order_acquire, memory_order_relaxed))
             return;
         if (++spins > 64)
             sched_yield();
@@ -68,7 +69,7 @@ void LightLock_Lock(LightLock *lock)
 
 void LightLock_Unlock(LightLock *lock)
 {
-    atomic_store_explicit((_Atomic s32 *)lock, 0, memory_order_release);
+    atomic_store_explicit((_Atomic s32 *)lock, 1, memory_order_release);
 }
 
 void LightEvent_Init(LightEvent *event, ResetType type)

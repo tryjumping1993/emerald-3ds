@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — AYN Thor
+
+- Native Android dual-screen port: GLES voxel overworld and battles at 4x
+  resolution, AAudio, touch controls and 120 Hz output with half-tick motion.
+- Fixed indexed voxel models drawing giant black polygons over the northeast
+  of the view. Refresh pacing now follows Android's actual display mode and
+  stays stable through map-loading stalls.
+- Bottom-screen idle dimming, persistent controller remapping, lid/background
+  suspension, display fallback, verified pack import, and reduced rendering
+  work during fast-forward.
+- Fixed settings changes hanging on the Android lock shim, and restored the
+  requested refresh mode after sleep. Game tables are loaded from the private
+  pack, with relocation sites identified by symbol index instead of name.
+- Thor targets in the desktop/web builder, APK signing and release auditing,
+  a tracked adb development helper, installation instructions and a
+  Rayquaza-themed launcher icon.
+
 ## 0.4.0 — 2026-10-16
 
 - The project is now called Emerald 3DS, by Zallax: new name on the HOME

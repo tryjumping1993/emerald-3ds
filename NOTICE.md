@@ -36,6 +36,10 @@ only the original Emerald 3DS work.
 
 ## Game content
 
+The Thor launcher icon is newly generated Rayquaza fan artwork requested by
+the maintainer, rather than extracted ROM artwork. Its provenance is in
+`android_port/ICON.md`; Pokémon character rights remain with their owners.
+
 Pokémon Emerald's code, data, graphics, audio and text are © Nintendo, Game
 Freak and Creatures. None of it is included in this repository or in the
 releases; the builder produces the data pack on the player's computer from

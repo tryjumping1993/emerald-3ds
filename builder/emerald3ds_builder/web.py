@@ -42,14 +42,14 @@ STAGES = {
 }
 
 
-def supported_sha1s(manifest: dict | None) -> tuple[str, ...]:
+def supported_sha1s(manifest: dict | None, target: str = "3ds") -> tuple[str, ...]:
     if manifest:
-        return tuple(v["rom"]["sha1"] for v in rom_variants(manifest))
+        return tuple(v["rom"]["sha1"] for v in rom_variants(manifest, target))
     return (SUPPORTED_SHA1,)
 
 
 def build_pack_for_web(rom_path, payload_path, output_path, progress_callback=None,
-                       manifest_path=None) -> dict:
+                       manifest_path=None, target: str = "3ds") -> dict:
     """ROM -> emerald3ds.pak with in-process generators.
 
     progress_callback(stage, fraction, message): stage is one of "rom", "data",
@@ -69,19 +69,22 @@ def build_pack_for_web(rom_path, payload_path, output_path, progress_callback=No
             # "Generating the 3D scenery: buildings (4/5)" -> its stage, the text whole
             progress_callback(STAGES.get(message.split(": ", 1)[0], "data"), fraction, message)
 
-    rom = load_rom(Path(rom_path), supported_sha1s(manifest))
+    if target not in ("3ds", "thor"):
+        raise BuilderError("Unknown build target.", code="target_invalid")
+    rom = load_rom(Path(rom_path), supported_sha1s(manifest, target))
     fetcher = followers.Fetcher(followers.load_sources(), fetch=followers.xhr_fetch, workers=1,
                                 hosts=followers.HOSTS[1:])
-    info = build_pack(Path(rom_path), Payload(Path(payload_path)), Path(output_path), report,
+    info = build_pack(Path(rom_path), Payload(Path(payload_path), platform=target), Path(output_path), report,
                       runner="inprocess", rom=rom, follower_fetcher=fetcher)
     info.pop("payload")
-    expected = next((v["dataAbi"] for v in rom_variants(manifest) if v["rom"]["sha1"] == rom.sha1),
+    expected = next((v["dataAbi"] for v in rom_variants(manifest, target) if v["rom"]["sha1"] == rom.sha1),
                     None) if manifest is not None else None
     if expected is not None and "%08x" % info["abi"] != expected:
         raise BuilderError("The generated data does not match this release's manifest.",
                            code="abi_mismatch")
     info["abi"] = "%08x" % info["abi"]
     info["builderVersion"] = __version__
+    info["platform"] = target
     return info
 
 
@@ -98,11 +101,11 @@ def describe(exc: BaseException) -> dict:
             "hint": "%s: %s" % (type(exc).__name__, exc)}
 
 
-def run_web_build(rom_path, payload_path, output_path, progress_callback=None, manifest_path=None) -> str:
+def run_web_build(rom_path, payload_path, output_path, progress_callback=None, manifest_path=None, target: str = "3ds") -> str:
     """build_pack_for_web, never raising: returns a JSON string
     {"ok": true, "result": {...}} or {"ok": false, "error": {code, message, hint}}."""
     try:
-        result = build_pack_for_web(rom_path, payload_path, output_path, progress_callback, manifest_path)
+        result = build_pack_for_web(rom_path, payload_path, output_path, progress_callback, manifest_path, target)
         return json.dumps({"ok": True, "apiVersion": API_VERSION, "result": result})
     except BaseException as exc:  # noqa: BLE001 - everything is reported to the page
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):

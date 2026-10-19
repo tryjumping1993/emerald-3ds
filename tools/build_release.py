@@ -147,11 +147,14 @@ def main() -> None:
                     help="clean French (BPEF) ROM: also build the French variant (payload/fr/)")
     ap.add_argument("--italian-rom", type=Path, default=None,
                     help="clean Italian (BPEI) ROM: also build the Italian variant (payload/it/)")
+    ap.add_argument("--thor-payload", type=Path, help="signed, audited Thor variants from build_thor_payload.py")
     ap.add_argument("--nm", default=os.environ.get("NM", "arm-none-eabi-nm"))
     ap.add_argument("--make", default=None, help="command that runs make in 3ds_port (default: make)")
     ap.add_argument("--skip-make", action="store_true")
     ap.add_argument("--skip-recipe", action="store_true")
     ap.add_argument("--skip-exe", action="store_true")
+    ap.add_argument("--prebuilt-builder", type=Path,
+                    help="use a Windows PyInstaller output directory instead of freezing on this host")
     ap.add_argument("--skip-cia", action="store_true", help="no HOME Menu forwarder (needs makerom, bannertool)")
     ap.add_argument("--allow-local-mk", action="store_true",
                     help="build even though 3ds_port/local.mk adds this machine's settings")
@@ -214,15 +217,32 @@ def main() -> None:
                         "script": "localize_italian.py"})
     for locale in locales:
         build_localized_variant(args, tag, payload / locale["code"], locale)
+    thor_variants = []
+    if args.thor_payload:
+        source = args.thor_payload.resolve()
+        for language, folder in [("", source)] + [(code, source / code) for code in ("es", "fr", "it") if (source / code).is_dir()]:
+            dest = payload / "android" / language
+            dest.mkdir(parents=True, exist_ok=True)
+            for name in ("Emerald3DS-Thor.apk", "emerald3ds.recipe"):
+                if not (folder / name).is_file():
+                    sys.exit("Thor payload is incomplete: %s" % (folder / name))
+                shutil.copy2(folder / name, dest / name)
+            thor_variants.append((language, dest))
 
     if not args.skip_exe:
-        build = ROOT / "builder" / "build"
-        build.mkdir(parents=True, exist_ok=True)
-        (build / "hidden-imports.txt").write_text("\n".join(sorted(external)) + "\n", encoding="utf-8")
-        run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
-             "--distpath", build / "dist", "--workpath", build / "pyi", "emerald3ds-builder.spec"],
-            cwd=ROOT / "builder")
-        shutil.copytree(build / "dist" / "Emerald3DS-Builder", release, dirs_exist_ok=True)
+        if args.prebuilt_builder:
+            builder_dir = args.prebuilt_builder.resolve()
+            if not all((builder_dir / name).is_file() for name in ("Emerald3DS-Builder.exe", "emerald3ds-builder-cli.exe")):
+                sys.exit("The prebuilt builder must contain both Windows executables.")
+        else:
+            build = ROOT / "builder" / "build"
+            build.mkdir(parents=True, exist_ok=True)
+            (build / "hidden-imports.txt").write_text("\n".join(sorted(external)) + "\n", encoding="utf-8")
+            run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
+                 "--distpath", build / "dist", "--workpath", build / "pyi", "emerald3ds-builder.spec"],
+                cwd=ROOT / "builder")
+            builder_dir = build / "dist" / "Emerald3DS-Builder"
+        shutil.copytree(builder_dir, release, dirs_exist_ok=True)
 
     shutil.copy2(ROOT / "builder" / "README-release.txt", release / "README.txt")
     licenses = release / "LICENSES"
@@ -233,6 +253,8 @@ def main() -> None:
             shutil.copy2(src, licenses / rel)
     for rel in ("3ds_port/src/voxel/NOTICE.md",):
         shutil.copy2(ROOT / rel, licenses / "voxel-NOTICE.md")
+    if thor_variants:
+        shutil.copy2(ROOT / "android_port/ICON.md", licenses / "Thor-icon-NOTICE.md")
 
     archive = DIST / ("Emerald3DS-%s-Windows.zip" % tag)
     if archive.exists():
@@ -251,6 +273,10 @@ def main() -> None:
         asset = DIST / ("Emerald3DS-%s.3dsx" % locale["code"])
         shutil.copy2(payload / locale["code"] / "Emerald3DS.3dsx", asset)
         standalone.append(asset)
+    for language, folder in thor_variants:
+        asset = DIST / ("Emerald3DS-Thor%s.apk" % ("-" + language if language else ""))
+        shutil.copy2(folder / "Emerald3DS-Thor.apk", asset)
+        standalone.append(asset)
     cia = None
     if not args.skip_cia:
         forwarder = PORT / "forwarder"
@@ -264,6 +290,9 @@ def main() -> None:
         run([sys.executable, ROOT / "tools/release_audit.py", "--zip", archive, "--strict", "--rom", rom])
         run([sys.executable, ROOT / "tools/release_audit.py", "--zip", web_zip, "--strict", "--rom", rom,
              "--web-payload"])
+        for asset in standalone:
+            if asset.suffix == ".apk":
+                run([sys.executable, ROOT / "tools/release_audit.py", "--apk", asset, "--strict", "--rom", rom])
     sums = DIST / "SHA256SUMS.txt"
     assets = [archive] + standalone + ([cia] if cia else []) + [web_zip, web_manifest]
     lines = ["%s  %s" % (sha256(path), path.name) for path in assets]

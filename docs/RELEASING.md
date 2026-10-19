@@ -10,6 +10,7 @@ contains a ROM, a data pack or anything extracted from the game.
 | `Emerald3DS-es.3dsx` | the same for the Spanish variant (installed as `Emerald3DS.3dsx`) |
 | `Emerald3DS-fr.3dsx` | the same for the French variant (installed as `Emerald3DS.3dsx`) |
 | `Emerald3DS-it.3dsx` | the same for the Italian variant (installed as `Emerald3DS.3dsx`) |
+| `Emerald3DS-Thor.apk` | signed, engine-only Android app; localized variants add `-es`, `-fr` or `-it` |
 | `Emerald3DS-Forwarder.cia` | optional HOME Menu shortcut that starts the installed 3DSX (Luma3DS) |
 | `Emerald3DS-WebPayload.zip` | the web builder (website): payload, builder package, licences, `web-manifest.json` |
 | `web-manifest.json` | the same manifest on its own, read by the website without downloading the payload |
@@ -189,6 +190,31 @@ python tools/release_audit.py --zip dist/Emerald3DS-WebPayload.zip --strict --we
 ```
 
 ## Before tagging
+
+For a combined Thor release, first build the engine with
+`python tools/thor_dev.py build --release` (see [THOR_BUILD.md](THOR_BUILD.md)
+for signing setup). Then create the target payload from that exact build:
+
+```
+python tools/build_thor_payload.py --version X.Y.Z --apk build/Emerald3DS-Thor.apk --rom baserom.gba --gba-elf path/to/pokeemerald.elf --apksigner path/to/apksigner
+```
+
+The original GBA ELF must match the player's ROM. The script verifies the APK
+signature, checks its ABI against the staged engine, scans every APK member
+against the ROM and checks the recipe's literal budgets. It also includes
+the metadata needed to regenerate voxel assets. Pass
+`--thor-payload dist/thor-payload` to `build_release.py`; it adds the APK,
+target recipes and manifest variants to the Windows and web payloads, and
+lists the standalone APK in `SHA256SUMS.txt`. Local ROMs, data packs,
+measurement hooks and signing credentials never belong in release assets.
+When assembling on Linux, `--prebuilt-builder DIR` accepts the complete
+Windows PyInstaller output folder (both executables and `_internal/`).
+Freeze it on Windows first; all normal payload and ZIP audits still run.
+
+Back up the signing key and credentials privately. Android updates must use
+the same certificate; replacing a development-key installation requires a
+save backup before uninstalling it. Test Android's pack picker and preserve
+the existing save/settings when updating a pack.
 
 1. On a clean Windows machine without Python or devkitPro: extract the ZIP,
    run the builder with the ROM, install to an SD card, boot the game.

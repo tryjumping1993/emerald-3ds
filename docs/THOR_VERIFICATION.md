@@ -1,0 +1,77 @@
+# Thor verification — 2026-10-19
+
+This records the local verification of the Thor port and its English release
+payload. Build and installation commands are in [THOR_BUILD.md](THOR_BUILD.md)
+and [THOR_INSTALLATION.md](THOR_INSTALLATION.md).
+
+| Check | Result |
+|---|---|
+| Android native build, Kotlin, lint and release packaging | Passed, ARMv7 / NDK 27.3.13750724 |
+| Production APK signature | APK Signature Scheme v2 verified |
+| Builder tests | 89 tests, 2 skipped, no failures |
+| Android pack-import JUnit tests | 2 passed |
+| GLES host regression | Indexed voxel shader/layout, index formats, stream/VRAM offsets and return to 2D passed |
+| Actual shim lock host regression | Static initializer, dynamic initialization and threaded contention passed |
+| Host voxel/input/video/settings/clock checks | Passed |
+| 3DS engine build and full `make verify` | Passed in the official devkitARM container |
+| Windows standalone builder | Built; frozen CLI verifies the final pack and regenerates the intro image with matching SHA-256 |
+| Windows and web release ZIPs, standalone APK | Strict recursive audits including the clean-ROM scan passed |
+
+The Windows builder regenerated all five scenery outputs from the clean
+English ROM. That pack matched its staged engine byte-for-byte. The final
+native lock fix changed executable pointers, so a new recipe was generated
+and checked against every final data entry. Scenery inputs, metadata and
+output CRCs remained identical; reusing those already regenerated outputs
+reconstructed the final staged pack exactly:
+
+```text
+Thor ABI:       07946566
+Pack SHA-256:   67adc57f327510370c07674f0f7847b08813079c5b149bedf44c2915fec6af5b
+APK SHA-256:    53c1a0e4b3301ec1ee78327b0b7a73ea52631b348a983d780bcdd294ef7ca4e0
+Certificate:    64da29e6bb67af51c359402849a19aaed87ce06d50e1bdfef5f0527cc29f6141
+```
+
+The Thor recipe reconstructs 6,591 ROM-derived entries and five generated
+entries, with 2,202 voxel inputs. It passes the existing literal budgets:
+20,086 unexplained bytes overall, including 19,872 bytes classified as
+game-data padding and **zero** unexplained bytes of game objects. Initialized
+game tables and PIC const tables are in the private pack, outside the APK.
+
+## Device checks
+
+On an attached AYN Thor, the northeast black polygons are gone. Checks cover
+Littleroot exterior and house interior, Rustboro, Slateport and a Route 101
+voxel battle at 4x resolution. Normal rendering stays around 59.6 frames/s,
+with two pictures per tick and swaps averaging 8.38 ms at 120 Hz. Map-load
+stalls no longer switch the pacing mode.
+
+The bottom screen dims to 20% after idle. The remap page swaps A/B, persists
+across restart and resets to defaults. The system document picker imports a
+valid pack. Save and settings hashes match their pre-test backups. Changing
+speed to 1.5x and back now saves successfully and keeps rendering; this caught
+and fixed the shim's incompatible static lock initializer.
+
+Presentation, companion Activity and inline routes were exercised. Screen
+off pauses the engine and audio; wake resumes them and recovers 120 Hz.
+Both windows now request the same refresh preference because a 60 Hz
+companion vote could keep the top panel at 60 Hz after wake on this firmware.
+The bottom compositor still presents only when needed.
+
+## 3DS comparison
+
+With build provenance and the deliberately random link ID held fixed, the
+3DS executable segments, loader relocation tables and SMDH match commit
+`4debcc9` byte-for-byte. The data ABI is unchanged (`7e05a663`). The complete
+3DSX differs in RomFS: the shared symbol-index correction adds six valid
+external relocation sites to `gamedata.rel` (24 bytes).
+Full-container byte identity is therefore not claimed.
+
+Sanitized host tests used a `gcc -no-pie` wrapper under WSL, with
+`ASAN_OPTIONS=handle_segv=0:detect_leaks=0`, to avoid sanitizer runtime crashes
+observed with the default PIE configuration. Address/undefined instrumentation
+remained enabled. No physical 3DS run was performed.
+
+Long-duration battery drain, every weather condition, physical hinge events,
+other firmware and panels that refuse the requested mode remain broader
+hardware coverage. The device tests were USB-powered and do not establish
+battery-life figures. These local release assets have not been published.

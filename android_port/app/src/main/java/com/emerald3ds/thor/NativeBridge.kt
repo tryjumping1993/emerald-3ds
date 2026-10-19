@@ -14,6 +14,7 @@ object NativeBridge {
     @JvmStatic external fun nativeStart(internalDir: String, externalDir: String): Boolean
     @JvmStatic external fun nativeSetSurface(screen: Int, surface: Surface?)
     @JvmStatic external fun nativeSurfaceSize(screen: Int, width: Int, height: Int)
+    @JvmStatic external fun nativeDisplayRate(hz: Float)
     @JvmStatic external fun nativePause()
     @JvmStatic external fun nativeResume()
     @JvmStatic external fun nativeStop()
@@ -27,8 +28,10 @@ object NativeBridge {
     /** Set by the Activity that shows the status overlay and owns the game's lifetime. */
     @Volatile var onMessage: ((String) -> Unit)? = null
     @Volatile var onGameExit: (() -> Unit)? = null
+    @Volatile var onRefresh: ((Int) -> Unit)? = null
 
     /** Called by native code, from any thread. */
     @JvmStatic fun showMessage(text: String) { main.post { onMessage?.invoke(text) } }
     @JvmStatic fun gameExited() { main.post { onGameExit?.invoke() } }
+    @JvmStatic fun requestRefresh(hz: String) { main.post { onRefresh?.invoke(hz.toInt()) } }
 }

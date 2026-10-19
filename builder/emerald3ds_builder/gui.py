@@ -37,7 +37,8 @@ class App:
         self.rom_status = ttk.Label(frame, text="")
         self.rom_status.grid(row=2, column=0, columnspan=2, sticky="w", pady=(2, 10))
 
-        ttk.Label(frame, text="Install to (the root of your 3DS SD card)").grid(
+        self.destination_label = ttk.Label(frame, text="Install to (the root of your 3DS SD card)")
+        self.destination_label.grid(
             row=3, column=0, columnspan=2, sticky="w")
         self.sd = tk.StringVar()
         self.sd_box = ttk.Combobox(frame, textvariable=self.sd, width=53)
@@ -46,16 +47,21 @@ class App:
         self.sd_status = ttk.Label(frame, text="")
         self.sd_status.grid(row=5, column=0, columnspan=2, sticky="w", pady=(2, 10))
 
+        self.target = tk.StringVar(value="3ds")
+        target_box = ttk.Combobox(frame, textvariable=self.target, values=("3ds", "thor"), state="readonly", width=12)
+        target_box.grid(row=6, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        target_box.bind("<<ComboboxSelected>>", lambda e: self.change_target())
+        self.target_box = target_box
         self.bar = ttk.Progressbar(frame, length=420, maximum=1000)
-        self.bar.grid(row=6, column=0, columnspan=2, sticky="we")
+        self.bar.grid(row=7, column=0, columnspan=2, sticky="we")
         self.step = ttk.Label(frame, text="")
-        self.step.grid(row=7, column=0, columnspan=2, sticky="w", pady=(2, 10))
+        self.step.grid(row=8, column=0, columnspan=2, sticky="w", pady=(2, 10))
 
         self.button = ttk.Button(frame, text="Install", command=self.start)
-        self.button.grid(row=8, column=0, columnspan=2)
+        self.button.grid(row=9, column=0, columnspan=2)
         ttk.Label(frame, text="The ROM never leaves this computer and is not copied; only the "
                               "generated data pack is written.", foreground="#555",
-                  wraplength=460).grid(row=9, column=0, columnspan=2, pady=(12, 0))
+                  wraplength=460).grid(row=10, column=0, columnspan=2, pady=(12, 0))
 
         self.rom.trace_add("write", lambda *a: self.check_rom())
         self.sd.trace_add("write", lambda *a: self.check_sd())
@@ -63,6 +69,13 @@ class App:
         root.after(100, self.poll)
 
     # -- inputs -------------------------------------------------------------
+    def change_target(self):
+        base = self.payload.shared or self.payload.root
+        self.payload = Payload(base, platform=self.target.get())
+        self.destination_label.config(text="Output folder (APK and pack for the Thor)" if self.target.get() == "thor"
+                                      else "Install to (the root of your 3DS SD card)")
+        self.check_sd()
+
     def pick_rom(self):
         path = filedialog.askopenfilename(title="Pokemon Emerald ROM",
                                           filetypes=[("GBA ROM", "*.gba *.zip"), ("All files", "*.*")])
@@ -96,6 +109,8 @@ class App:
         path = Path(self.sd.get().strip()) if self.sd.get().strip() else None
         if path is None:
             self.sd_status.config(text="")
+        elif self.target.get() == "thor" and path.is_dir():
+            self.sd_status.config(text="The APK and data pack will be written into emerald3ds/.", foreground="#1b7a1b")
         elif (path / "Nintendo 3DS").is_dir():
             self.sd_status.config(text="OK  Nintendo 3DS SD card detected", foreground="#1b7a1b")
         elif path.is_dir():
@@ -112,11 +127,12 @@ class App:
         if not rom or not sd:
             messagebox.showwarning(TITLE, "Choose the ROM and the destination first.")
             return
-        dest = Path(sd) / APP_DIR
+        dest = Path(sd) / (APP_DIR if self.target.get() == "3ds" else Path("emerald3ds"))
         if not messagebox.askokcancel(TITLE, "Emerald 3DS will be installed to:\n\n%s\n\nContinue?" % dest):
             return
         self.busy = True
         self.button.state(["disabled"])
+        self.target_box.state(["disabled"])
         threading.Thread(target=self.work, args=(Path(rom), Path(sd)), daemon=True).start()
 
     def work(self, rom: Path, sd: Path):
@@ -129,7 +145,7 @@ class App:
                 info = build_pack(rom, self.payload, pak_path, lambda f, m: progress(f * 0.9, m))
                 files = {exe.name: exe for exe in info["payload"].executables()}
                 files["emerald3ds.pak"] = pak_path
-                dest = install(sd, files, lambda f: progress(0.9 + 0.1 * f, "Copying to the SD card"))
+                dest = install(sd, files, lambda f: progress(0.9 + 0.1 * f, "Copying files"), target=self.payload.platform)
             self.events.put(("done", str(dest)))
         except BuilderError as exc:
             self.events.put(("error", str(exc)))
@@ -146,7 +162,8 @@ class App:
                 elif event[0] == "done":
                     self.finish()
                     messagebox.showinfo(TITLE, "Done. Emerald 3DS is installed in\n%s\n\n"
-                                               "Start it from the Homebrew Launcher." % event[1])
+                                               "%s" % (event[1], "Install the APK, then import emerald3ds.pak using Android Back in the app."
+                                                       if self.payload.platform == "thor" else "Start it from the Homebrew Launcher."))
                 elif event[0] == "error":
                     self.finish()
                     messagebox.showerror(TITLE, event[1])
@@ -157,6 +174,7 @@ class App:
     def finish(self):
         self.busy = False
         self.button.state(["!disabled"])
+        self.target_box.state(["!disabled", "readonly"])
         self.step.config(text="")
         self.bar["value"] = 0
 

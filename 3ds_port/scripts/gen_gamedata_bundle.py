@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Move the game's linked read-only data out of the executable.
+"""Move the game's linked data out of the executable.
 
 The linker script (emerald3ds.ld.in) gathers the .rodata of every game
-translation unit into one output section, .gamedata. The build links twice
+translation unit into one output section, .gamedata. On Android this also
+includes initialized variables and PIC const tables. The build links twice
 with the same objects and the same layout: once with the section's contents
 (the image, build/gamedata_image.elf) and once with the section reserved as
 NOLOAD (the shipped executable). This script checks that both links placed
@@ -57,18 +58,22 @@ def global_symbols(elf: Path) -> dict[str, int]:
     return result
 
 
-def absolute_symbols(elf: Path) -> set[str]:
-    """Names of the symbols that are plain numbers (NULL, TRUE, flag constants the assembler
+def absolute_symbols(elf: Path) -> set[int]:
+    """Indices of symbols that are plain numbers (NULL, TRUE, flag constants the assembler
     .set): a word that holds one is a value, not an address, and is never rebased. lld keeps
     the relocations against them that GNU ld drops."""
     out = subprocess.check_output([tool("arm-none-eabi-readelf"), "--symbols", "--wide", str(elf)],
                                   text=True, errors="ignore")
-    names = set()
+    indices = set()
+    inside = False
     for line in out.splitlines():
+        if line.startswith("Symbol table"):
+            inside = "'.symtab'" in line
+            continue
         fields = line.split()
-        if len(fields) >= 8 and fields[6] == "ABS":
-            names.add(fields[7])
-    return names
+        if inside and len(fields) >= 8 and fields[6] == "ABS":
+            indices.add(int(fields[0].rstrip(":")))
+    return indices
 
 
 def relocations(elf: Path, section: str) -> list[tuple[int, str]]:
@@ -83,9 +88,12 @@ def relocations(elf: Path, section: str) -> list[tuple[int, str]]:
             continue
         if not inside:
             continue
-        m = re.match(r"^([0-9a-f]{8})\s+[0-9a-f]+\s+(R_ARM_\w+)(?:\s+[0-9a-f]{8}\s+(\S+))?", line)
-        if m and m.group(3) not in absolute:
-            found.append((int(m.group(1), 16), m.group(2)))
+        m = re.match(r"^([0-9a-f]{8})\s+([0-9a-f]+)\s+(R_ARM_\w+)", line)
+        # Local symbols can share a name: REG_BASE is both an assembler
+        # constant and the emulated register array. r_info identifies which
+        # symbol this relocation actually uses (ELF32 ARM: index >> 8).
+        if m and (int(m.group(2), 16) >> 8) not in absolute:
+            found.append((int(m.group(1), 16), m.group(3)))
     return found
 
 

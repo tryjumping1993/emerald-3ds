@@ -7750,12 +7750,12 @@ static bool ReplayCarry(float alpha)
 }
 #endif
 
+#ifdef PLATFORM_ANDROID
 static void DrawWorldBody(C3D_RenderTarget *target, int eye);
 
 /* The world as it is at the tick, or (alpha above 0) a part of a tick on. */
 static void DrawWorld(C3D_RenderTarget *target, int eye, float alpha)
 {
-#ifdef PLATFORM_ANDROID
     VoxelCamera saved = sCamera;
 
     sDynBound = sDynamic;
@@ -7779,22 +7779,17 @@ static void DrawWorld(C3D_RenderTarget *target, int eye, float alpha)
     DrawWorldBody(target, eye);
     sCamera = saved;
     sDynBound = sDynamic;
-#else
-    (void)alpha;
-    DrawWorldBody(target, eye);
-#endif
 }
 
 void CtrVoxel_Draw(C3D_RenderTarget *target, int eye)
 {
-#ifdef PLATFORM_ANDROID
     C3D_ReplayWorld(DrawWorld, target, eye);
-#else
-    DrawWorld(target, eye, 0.0f);
-#endif
 }
 
 static void DrawWorldBody(C3D_RenderTarget *target, int eye)
+#else
+void CtrVoxel_Draw(C3D_RenderTarget *target, int eye)
+#endif
 {
     C3D_Mtx projection, view;
     C3D_AttrInfo *attr;

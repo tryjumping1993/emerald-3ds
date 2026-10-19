@@ -193,6 +193,12 @@ def zip_files(archive: Path) -> list[tuple[str, callable]]:
     return [(i.filename, (lambda i=i: zf.read(i))) for i in zf.infolist() if not i.is_dir()]
 
 
+def apk_files(data: bytes, name: str) -> list[tuple[str, callable]]:
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        return [(name + "!/" + i.filename, lambda data=archive.read(i): data)
+                for i in archive.infolist() if not i.is_dir()]
+
+
 def audit(entries, allow: Allow, denylist, rom_index: RomIndex | None,
           context: str) -> list[Finding]:
     findings: list[Finding] = []
@@ -214,7 +220,13 @@ def audit(entries, allow: Allow, denylist, rom_index: RomIndex | None,
             findings.append(Finding(name, "forbidden-name"))
         if read()[:4] in FORBIDDEN_MAGIC:
             findings.append(Finding(name, "follower-sprite"))
-        if "romfs" in parts[:-1] and path.name not in ROMFS_ALLOWED:
+        apk_engine = False
+        if "!/assets/romfs/" in name:
+            from port_common.staging import is_engine
+            rel = name.split("!/assets/romfs/", 1)[1]
+            # Development APKs with embedded data must never pass the release audit.
+            apk_engine = is_engine(rel) and rel != "data.embedded"
+        if "romfs" in parts[:-1] and path.name not in ROMFS_ALLOWED and not apk_engine:
             findings.append(Finding(name, "generated-romfs"))
         if "third_party" in parts[:-1]:
             idx = parts.index("third_party")
@@ -222,6 +234,19 @@ def audit(entries, allow: Allow, denylist, rom_index: RomIndex | None,
                 third_party_dirs.add("/".join(path.parts[:idx + 2]))
 
         data = read()
+        if suffix == ".apk":
+            try:
+                nested = apk_files(data, name)
+                names_in_apk = {p.split("!/", 1)[1] for p, _ in nested}
+                if any(p.startswith("/") or "\\" in p or ".." in p.split("/") for p in names_in_apk):
+                    findings.append(Finding(name, "apk-invalid-path"))
+                if "AndroidManifest.xml" not in names_in_apk or "lib/armeabi-v7a/libemerald3ds.so" not in names_in_apk:
+                    findings.append(Finding(name, "apk-engine-missing"))
+                if any(p.startswith("lib/") and not p.startswith("lib/armeabi-v7a/") for p in names_in_apk):
+                    findings.append(Finding(name, "apk-unsupported-abi"))
+                findings.extend(audit(nested, allow, denylist, rom_index, "apk"))
+            except (zipfile.BadZipFile, RuntimeError, OSError) as exc:
+                findings.append(Finding(name, "apk-invalid", str(exc)))
         # Unmodified third-party runtime (the bundled Python, Tk, Pillow): its
         # size, its strings and its generic constant tables are not ours to
         # judge; the checks for a ROM, a data pack or a secret still apply.
@@ -313,6 +338,7 @@ def main(argv: list[str] | None = None) -> int:
     target = ap.add_mutually_exclusive_group(required=True)
     target.add_argument("--repo", type=Path, help="repository or export directory")
     target.add_argument("--zip", type=Path, help="release archive")
+    target.add_argument("--apk", type=Path, help="engine-only Thor APK, including its uncompressed contents")
     ap.add_argument("--strict", action="store_true", help="exit 1 on any finding")
     ap.add_argument("--allow", type=Path, default=None, help="allowlist (TOML)")
     ap.add_argument("--denylist", type=Path, default=None, help="local denylist")
@@ -336,7 +362,11 @@ def main(argv: list[str] | None = None) -> int:
                                            if p.exists()), None)
     else:
         allow_path = args.allow or DEFAULT_ALLOW
-        entries = zip_files(args.zip)
+        if args.apk:
+            # Include the APK itself so the recursive scan also checks its engine/ABI contract.
+            entries = [(args.apk.name, args.apk.read_bytes)]
+        else:
+            entries = zip_files(args.zip)
         context = "zip"
         deny_path = args.denylist or (HERE.parent / ".public-denylist")
 
@@ -350,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
     findings = audit(entries, allow, denylist, rom_index, context)
     if args.web_payload:
         findings += audit_web_payload(entries)
-    label = str(args.repo or args.zip)
+    label = str(args.repo or args.zip or args.apk)
     print("release_audit: %d files checked in %s (%d denylist patterns%s)"
           % (len(entries), label, len(denylist), ", ROM scan" if rom_index else ""))
     for f in findings:

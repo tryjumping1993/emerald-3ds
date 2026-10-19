@@ -1,5 +1,40 @@
 # AYN Thor port: plan
 
+## Implementation status — 2026-10-19
+
+The Android engine now runs on an attached AYN Thor. The remainder of this
+document preserves the original conversion design; this status section and
+[THOR_BUILD.md](THOR_BUILD.md) describe the implementation as it stands.
+
+| Area | Status |
+|---|---|
+| Engine, input, audio, files and dual displays | Implemented; Presentation, second Activity and inline routes |
+| GLES compositor, voxel field and voxel battles | Implemented at 4x logical render resolution |
+| 120 Hz output | Two pictures per game tick, with half-tick voxel motion; mode selected from Android display callbacks |
+| Northeast black region | Fixed: indexed static meshes now use the voxel shader and vertex layout |
+| Bottom OLED idle behavior | 20% brightness after 30 seconds; first touch wakes without acting |
+| Remapping | Android Back menu, persistent button mapping, hats and triggers use the same mappings |
+| Sleep / display changes | Engine and audio suspend; held inputs reset; missing secondary display falls back inline |
+| Fast-forward | Retains display pacing, reuses the second picture to avoid an extra world render |
+| Data installation | System document picker imports and verifies a pack before replacing it |
+| Builder / web variants | Target-aware recipes and texture generation; optional manifest `platform` field |
+| Release tooling | Environment/private-file signing, payload creation, recursive APK audit, release assets/checksums |
+
+Device checks cover Littleroot, Rustboro, Slateport and a Route 101 voxel
+battle. The black region is gone and the 120 Hz mode stays selected through
+map warps; normal gameplay remains around 59.6 ticks per second. Host voxel
+checks, the GLES draw regression and synthetic builder tests run locally.
+See [THOR_VERIFICATION.md](THOR_VERIFICATION.md) for the device, host, recipe,
+signing and release-audit results, and the 3DS baseline comparison.
+Long-duration battery drain,
+every weather condition and every firmware/display combination still need
+broader hardware coverage. The English release assets and the 3DS build
+have been checked locally; the assets have not been published.
+
+The Android game build currently retains `PLATFORM_3DS` for the existing
+portable game hooks and additionally defines `PLATFORM_ANDROID`; the global
+`PLATFORM_PORT` rename proposed below has not been applied.
+
 A native Android port of Emerald 3DS for the AYN Thor, the dual-screen
 clamshell handheld: the game on the top screen, the touch interface on the
 bottom one, as on the 3DS, without an emulator. This document plans the

@@ -36,6 +36,18 @@ Install
 Saves are kept in /3ds/emerald3ds/emerald3ds.sav. Reinstalling or updating
 never touches it.
 
+Thor (Android)
+--------------
+When this release includes payload/android/, choose "thor" in the builder
+and an output folder instead of an SD card. Copy the APK and emerald3ds.pak
+from its emerald3ds/ folder to the Thor. Install the APK, open it and press
+Android Back -> Import game data pack. Select the pack, then close and reopen
+the app as prompted. Each language needs its matching Android payload.
+Back -> Controller buttons remaps the physical buttons. ZL/ZR change speed.
+Back up emerald3ds.sav before uninstalling Android builds; an APK update with
+the same signing key keeps the save. Files are under
+/sdcard/Android/data/com.emerald3ds.thor/files/emerald3ds/.
+
 Command line
 ------------
     emerald3ds-builder-cli.exe build   --rom "Pokemon Emerald.gba" --output out

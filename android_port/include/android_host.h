@@ -66,8 +66,8 @@ void AndroidHost_PresentBottom(const uint32_t *rgba, int width, int height);
  */
 void AndroidHost_GlMakeCurrent(void);
 /*
- * The panel's refresh against the game's 60 ticks a second. The host times the top screen's swaps (each
- * one waits for a vsync): a panel at 120 Hz gets two pictures per tick, so the engine presents again after
+ * The panel's actual display mode against the game's 60 ticks a second. Android reports mode changes:
+ * a panel at 120 Hz gets two pictures per tick, so the engine presents again after
  * its frame (PresentsPerTick 2) and the swaps, not the game, pace it; at 60 Hz it is 1. The hint is the
  * refresh rate asked of the system for the top surface (60 or 120), what the player's refresh_hz setting says.
  */
