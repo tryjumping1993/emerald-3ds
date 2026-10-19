@@ -56,6 +56,17 @@ void AndroidHost_ShowMessage(const char *text);
  */
 void AndroidHost_PresentTop(const uint32_t *rgba, int width, int height);
 void AndroidHost_PresentBottom(const uint32_t *rgba, int width, int height);
+/*
+ * Direct GL drawing, for the GPU compositor (c3d_gles.c): the engine thread owns the one
+ * GL context, which the host keeps current. GlMakeCurrent makes it current on whichever
+ * surface exists (or an idle one), for work with no screen to draw to: building textures.
+ * TopBegin makes the top surface current and says how big it is; false when the top screen has
+ * no surface (nothing to draw this frame). TopEnd swaps it. Between them the default
+ * framebuffer is the top screen.
+ */
+void AndroidHost_GlMakeCurrent(void);
+bool AndroidHost_TopBegin(int *width, int *height);
+void AndroidHost_TopEnd(void);
 /* The size of the surface a screen has now, in pixels; 0 x 0 without one. */
 void AndroidHost_TopSurfaceSize(int *width, int *height);
 void AndroidHost_BottomSurfaceSize(int *width, int *height);

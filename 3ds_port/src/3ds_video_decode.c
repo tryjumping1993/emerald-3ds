@@ -12,9 +12,16 @@ uint32_t CtrVideo_TextMapOffset(unsigned x, unsigned y, unsigned size)
 
 uint32_t CtrVideo_Texel(unsigned x, unsigned y, unsigned width)
 {
+#ifdef PLATFORM_ANDROID
+    /* Tiles of 8x8 texels left to right and down, each in rows: the Thor's textures are
+     * untiled when uploaded (android_port/src/c3d_gles.c), so the PICA's Morton order inside
+     * a tile has no meaning there. */
+    return ((y / 8) * (width / 8) + x / 8) * 64 + (y & 7) * 8 + (x & 7);
+#else
     unsigned morton = (x & 1) | ((y & 1) << 1) | ((x & 2) << 1)
                     | ((y & 2) << 2) | ((x & 4) << 2) | ((y & 4) << 3);
     return ((y / 8) * (width / 8) + x / 8) * 64 + morton;
+#endif
 }
 
 uint32_t CtrVideo_RGBA8(uint16_t color, bool opaque)

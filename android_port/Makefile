@@ -79,7 +79,7 @@ NATIVE_CPPFLAGS += -DCTR_VOXEL_LIGHTING=$(VOXEL_LIGHTING) -DCTR_SHOW_FPS=$(SHOW_
 NATIVE_CPPFLAGS += -Iinclude -Isrc -I$(ANDROID_ROOT)/include
 NATIVE_CFLAGS := $(filter-out -Werror,$(CFLAGS)) -fvisibility=hidden
 REUSED_SRCS := 3ds_log 3ds_input 3ds_input_decode 3ds_fs 3ds_data 3ds_pak 3ds_settings \
-	3ds_prof 3ds_scenario 3ds_daynight 3ds_clock_store 3ds_encounters 3ds_field_view 3ds_video_decode
+	3ds_prof 3ds_scenario 3ds_daynight 3ds_clock_store 3ds_encounters 3ds_field_view 3ds_video_decode 3ds_video
 ANDROID_SRCS := $(patsubst $(ANDROID_ROOT)/src/%.c,%,$(wildcard $(ANDROID_ROOT)/src/*.c))
 NATIVE_OBJS := $(patsubst %,build/native/%.o,$(REUSED_SRCS)) $(patsubst %,build/android/%.o,$(ANDROID_SRCS))
 

@@ -510,6 +510,47 @@ static void present(int index, const uint32_t *rgba, int w, int h)
     drawScreen(index, rgba, w, h);
 }
 
+void AndroidHost_GlMakeCurrent(void)
+{
+    applyPending();
+    Screen *s = &s_screen[SCREEN_TOP];
+    if (s->surface != EGL_NO_SURFACE && eglMakeCurrent(s_display, s->surface, s->surface, s_context))
+        return;
+    eglMakeCurrent(s_display, s_idleSurface, s_idleSurface, s_context);
+}
+
+bool AndroidHost_TopBegin(int *width, int *height)
+{
+    applyPending();
+    Screen *s = &s_screen[SCREEN_TOP];
+    *width = *height = 0;
+    if (s->surface == EGL_NO_SURFACE)
+    {
+        eglMakeCurrent(s_display, s_idleSurface, s_idleSurface, s_context);
+        return false;
+    }
+    if (!eglMakeCurrent(s_display, s->surface, s->surface, s_context))
+    {
+        surfaceFailed(SCREEN_TOP, eglGetError());
+        return false;
+    }
+    EGLint w = 0, h = 0;
+    eglQuerySurface(s_display, s->surface, EGL_WIDTH, &w);
+    eglQuerySurface(s_display, s->surface, EGL_HEIGHT, &h);
+    s->surfaceW = w;
+    s->surfaceH = h;
+    *width = w;
+    *height = h;
+    return w > 0 && h > 0;
+}
+
+void AndroidHost_TopEnd(void)
+{
+    Screen *s = &s_screen[SCREEN_TOP];
+    if (s->surface != EGL_NO_SURFACE && !eglSwapBuffers(s_display, s->surface))
+        surfaceFailed(SCREEN_TOP, eglGetError());
+}
+
 void AndroidHost_PresentTop(const uint32_t *rgba, int width, int height) { present(SCREEN_TOP, rgba, width, height); }
 void AndroidHost_PresentBottom(const uint32_t *rgba, int width, int height) { present(SCREEN_BOTTOM, rgba, width, height); }
 

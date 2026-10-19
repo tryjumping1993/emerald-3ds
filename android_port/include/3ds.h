@@ -129,6 +129,14 @@ void gfxFlushBuffers(void);
 void gfxSwapBuffers(void);
 void gspWaitForVBlank(void);
 
+/* The linear heap is ordinary memory here; the flush calls have no cache to flush. */
+void *linearAlloc(size_t size);
+void *linearMemAlign(size_t size, size_t alignment);
+void linearFree(void *memory);
+Result APT_CheckNew3DS(bool *out);
+void gfxSet3D(bool enable);
+GSPGPU_FramebufferFormat gfxGetScreenFormat(gfxScreen_t screen);
+
 /* The 3DS's memory pools: the Thor has none to report. */
 size_t linearSpaceFree(void);
 size_t vramSpaceFree(void);

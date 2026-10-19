@@ -27,6 +27,12 @@ void CtrBottom_LastBlitTicks(uint64_t *copy, uint64_t *flush);
 /* The whole canvas at level/4 of its brightness (0..4), for fades. */
 void CtrBottom_BlitDim(const uint16_t *canvas, int level);
 
+#ifdef PLATFORM_ANDROID
+/* A picture the compositor drew for the left `width` columns of the bottom screen (the PokeNav,
+ * the bag, the PC), rows top first, RGBA8: shown over what the button column's canvas holds
+ * there. The Thor's counterpart of the 3DS's display transfer into the framebuffer. */
+void CtrBottom_PresentRegion(const uint32_t *rgba, int width, int height);
+#endif
 /* Game side. Init before AgbMain; Frame once per frame, after input is
  * scanned and before the game reads its keys. */
 void CtrBottom_Init(void);

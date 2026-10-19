@@ -281,6 +281,23 @@ void gfxFlushBuffers(void) {}
 void gfxSwapBuffers(void) {}
 void gspWaitForVBlank(void) { svcSleepThread(16666667); }
 
+void *linearAlloc(size_t size) { return calloc(1, size); }
+
+void *linearMemAlign(size_t size, size_t alignment)
+{
+    void *memory = NULL;
+
+    if (posix_memalign(&memory, alignment < sizeof(void *) ? sizeof(void *) : alignment, size) != 0)
+        return NULL;
+    memset(memory, 0, size);
+    return memory;
+}
+
+void linearFree(void *memory) { free(memory); }
+Result APT_CheckNew3DS(bool *out) { *out = true; return 0; }
+void gfxSet3D(bool enable) { (void)enable; }
+GSPGPU_FramebufferFormat gfxGetScreenFormat(gfxScreen_t screen) { (void)screen; return GSP_RGB565_OES; }
+
 size_t linearSpaceFree(void) { return 0; }
 size_t vramSpaceFree(void) { return 0; }
 
@@ -421,6 +438,9 @@ void hidScanInput(void)
         sTouch.px = (u16)state.touchX;
         sTouch.py = (u16)state.touchY;
     }
+    if (held != sHeld)
+        __android_log_print(ANDROID_LOG_INFO, "Emerald3DS", "[INPUT] keys %05x -> %05x touch %d,%d", (unsigned)sHeld, (unsigned)held,
+                            (int)sTouch.px, (int)sTouch.py);
     sHeld = held;
 }
 

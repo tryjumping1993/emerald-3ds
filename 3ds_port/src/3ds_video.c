@@ -20,6 +20,30 @@
 /* A battle is on, transition and all (CtrVideo_InBattle, at the end). */
 static bool sInBattle;
 
+#ifdef PLATFORM_ANDROID
+/*
+ * Nothing on the Thor has to be kept in step with the console's GPU: no GX command queue
+ * whose room the uploads are budgeted against, no linear heap or VRAM to flush or clear,
+ * no early start of the frame. The driver does all of it, so these are the same names with
+ * nothing to do (android_port/src/c3d_gles.c).
+ */
+static gxCmdQueue_s *sFrameQueue;
+static unsigned sUploadCommands, sRenderReserve;
+#define RENDER_RESERVE 24u
+#define RENDER_RESERVE_MOST 28u
+static bool sGpuEarly;
+static float sCmdBufPeak;
+static uint64_t sGpuEarlyStart;
+static uint64_t sFlushTicks;
+static unsigned sFlushes;
+static void FlushLinear(void) {}
+static void ClearWhenMade(C3D_RenderTarget *target) { (void)target; }
+static void ClearWhenMadeForget(C3D_RenderTarget *target) { (void)target; }
+static bool ClearsRun(void) { return false; }
+static void GpuStartEarly(void) {}
+static bool GpuFinishEarly(void) { return false; }
+static bool GpuEarlyThisFrame(void) { return false; }
+#else
 /* Public queue passed by libctru, never a cast of Citro3D's private context.
  * Uploads reserve worst-case split+copy entries and leave the compositor's
  * clears, postprocessing, battle layers and final transfers room to finish. */
@@ -303,6 +327,8 @@ static bool GpuFinishEarly(void)
     }
     return true;
 }
+
+#endif /* PLATFORM_ANDROID */
 
 bool CtrVideo_TryVoxelUpload(void)
 {
@@ -1462,6 +1488,10 @@ static int GetTileSlot(unsigned address, unsigned bank, bool color256)
                 ++sStats.uploads;
             }
         }
+#ifdef PLATFORM_ANDROID
+            /* The GPU read this from the linear heap on the console; here it is uploaded when drawn from. */
+            C3D_TexTouch(&sAtlas, (size_t)slot * 64 * sizeof(uint16_t), 64 * sizeof(uint16_t));
+#endif
         tile->paletteVersion = sPaletteVersion[paletteId];
         tile->checked = sStats.frames + 1;
     }
@@ -7296,6 +7326,15 @@ static void RenderBattleScene(uint32_t clear)
 static bool sPlaneReleaseAsked;
 #define BOTTOM_SIZE 240
 #define BOTTOM_WIDTH 320
+/* The surface's own measures: the 3DS's framebuffer is a screen turned on its side, 240 wide;
+ * a Thor target is the picture, 320 wide. */
+#ifdef PLATFORM_ANDROID
+#define BOTTOM_TARGET_W BOTTOM_WIDTH
+#define BOTTOM_TARGET_H BOTTOM_SIZE
+#else
+#define BOTTOM_TARGET_W BOTTOM_SIZE
+#define BOTTOM_TARGET_H BOTTOM_WIDTH
+#endif
 static C3D_RenderTarget *sBottom;
 static uint32_t sBottomUsed, sBottomFailFrame;
 static bool sBottomFailed;
@@ -7322,10 +7361,10 @@ static bool BottomReady(bool wanted)
     sBottomUsed = sStats.frames;
     if (sBottom) return true;
     if (sBottomFailed && sStats.frames - sBottomFailFrame < LAYER_RETRY_FRAMES) return false;
-    sBottom = C3D_RenderTargetCreate(BOTTOM_SIZE, BOTTOM_WIDTH, GPU_RB_RGB565, -1);
+    sBottom = C3D_RenderTargetCreate(BOTTOM_TARGET_W, BOTTOM_TARGET_H, GPU_RB_RGB565, -1);
 #if CTR_VOXEL_ENABLED
     if (!sBottom && CtrVoxel_ReleaseIdleVram() > 0)
-        sBottom = C3D_RenderTargetCreate(BOTTOM_SIZE, BOTTOM_WIDTH, GPU_RB_RGB565, -1);
+        sBottom = C3D_RenderTargetCreate(BOTTOM_TARGET_W, BOTTOM_TARGET_H, GPU_RB_RGB565, -1);
 #endif
     ClearWhenMade(sBottom);
     if (!sBottom)
@@ -7373,6 +7412,19 @@ bool CtrVideo_BottomWhole(void) { return sBottomInUse && BottomWhole(sCentredScr
  * single-buffered (3ds_log.c) and the CPU canvas only writes the column past
  * it.
  */
+#ifdef PLATFORM_ANDROID
+/* The Thor's bottom screen is the host's surface, drawn from a picture handed to it
+ * (CtrBottom_PresentRegion, which keeps the button column's own canvas beside it). */
+static void BottomTransfer(void)
+{
+    static uint32_t pixels[BOTTOM_WIDTH * BOTTOM_SIZE];
+    unsigned columns = BottomWhole(sCentredScreen) ? BOTTOM_WIDTH : BOTTOM_SIZE;
+
+    if (!sBottom) return;
+    if (C3D_RenderTargetReadRGBA(sBottom, (int)columns, BOTTOM_SIZE, pixels))
+        CtrBottom_PresentRegion(pixels, (int)columns, BOTTOM_SIZE);
+}
+#else
 static void BottomTransfer(void)
 {
     u32 *fb = (u32 *)gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, NULL, NULL);
@@ -7387,6 +7439,7 @@ static void BottomTransfer(void)
                             | GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB565)
                             | GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO));
 }
+#endif
 
 /* The PokéNav's frame on the bottom screen, band by band (sNavMain). */
 static void NavCompose(void)
@@ -7634,7 +7687,11 @@ static void RenderEye(C3D_RenderTarget *target, uint32_t clear, float parallax)
             (CTR_GAME_WIDTH + width) / 2 / 512.0f, 1 - BOTTOM_SIZE / 256.0f};
 
         /* The framebuffer's own measures, as for a screen target. */
+#ifdef PLATFORM_ANDROID
+        C2D_SceneSize(BOTTOM_TARGET_W, BOTTOM_TARGET_H, false);
+#else
         C2D_SceneSize(BOTTOM_SIZE, BOTTOM_WIDTH, true);
+#endif
         C2D_ViewReset();
         Blend(5, false, false);
         C2D_DrawImageAt((C2D_Image){&sSurface, &middle}, 0, 0, 0, NULL, 1, 1);
@@ -8681,6 +8738,15 @@ static void RenderBattleStereo(uint32_t clear, float slider, C3D_Tex *world)
     PORT_PROF_END(bsEyes, PORT_PROF_BS_EYES);
 }
 
+#if !CTR_VOXEL_ENABLED
+/* The stage's smooth magnification uses it too (CompositeLayers), voxel world or not. */
+static void SurfaceFilter(GPU_TEXTURE_FILTER_PARAM filter)
+{
+    C2D_Flush();
+    C3D_TexSetFilter(&sSurface, filter, filter);
+    C3D_TexBind(0, &sSurface);
+}
+#endif
 #if CTR_VOXEL_ENABLED
 /* Seals a command list. Before the GPU is started early it is submitted at
  * FrameEnd, whose linear-heap flush covers all producers, Citro2D included;

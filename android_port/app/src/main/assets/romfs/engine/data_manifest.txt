@@ -348,7 +348,7 @@ e6983424        64 data/tilesets/secondary/unused_2/0.4bpp
 03dd8846       116 data/tilesets/secondary/unused_2/metatile_attributes.bin
 3fcc56a6       928 data/tilesets/secondary/unused_2/metatiles.bin
 c154145c      1320 data/tilesets/secondary/unused_2/tiles.4bpp.lz
-28bf7207   3436012 gamedata/gamedata.bin
+cab2df78   3435904 gamedata/gamedata.bin
 611e7b8f        64 generated/assets/build_root_src_diploma__sDiplomaPalettes.bin
 7d533eff        64 generated/assets/build_root_src_dodrio_berry_picking__sBg_Pal.bin
 ea5da626       352 generated/assets/build_root_src_field_specials__sDeoxysRockPalettes.bin
@@ -6587,5 +6587,5 @@ ce264739       220 graphics/wonder_news/bg7.bin.lz
 ce264739       220 graphics/wonder_news/bg8.bin.lz
 25e5eedb        32 graphics/wonder_news/bg8.gbapal
 6da9891c    652726 maps/layouts.bin
-f6f90821   1063092 scripts/scripts.bin
-49494ab0    684052 sound/songs.bin
+96960ca5   1063092 scripts/scripts.bin
+78d39cd7    684052 sound/songs.bin

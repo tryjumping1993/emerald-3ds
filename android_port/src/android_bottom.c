@@ -97,3 +97,14 @@ void CtrBottom_BlitDim(const uint16_t *canvas, int level)
     Convert(0, 0, CTR_BOTTOM_WIDTH, CTR_BOTTOM_HEIGHT, level);
     Present();
 }
+
+void CtrBottom_PresentRegion(const uint32_t *rgba, int width, int height)
+{
+    if (width > CTR_BOTTOM_WIDTH)
+        width = CTR_BOTTOM_WIDTH;
+    if (height > CTR_BOTTOM_HEIGHT)
+        height = CTR_BOTTOM_HEIGHT;
+    for (int y = 0; y < height; ++y)
+        memcpy(sPicture + (size_t)y * CTR_BOTTOM_WIDTH, rgba + (size_t)y * width, (size_t)width * sizeof(uint32_t));
+    Present();
+}
