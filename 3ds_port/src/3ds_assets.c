@@ -109,12 +109,34 @@ static void *ReadWholeFile(const char *path, u32 *outSize)
     return buffer;
 }
 
+/*
+ * The index holds the link-time addresses of the INCBIN stubs. A 3DSX loads where it was
+ * linked; an Android library loads wherever the linker puts it. romfs:/assets/asset_base.bin,
+ * when there is one, holds the link-time address of AgbMain - the reference symbol the
+ * bundles relocate by too - and every address of the index moves by the difference.
+ */
+#define ASSET_BASE_PATH "romfs:/assets/asset_base.bin"
+extern void AgbMain(void);
+
+static u32 LoadDelta(void)
+{
+    FILE *file = fopen(ASSET_BASE_PATH, "rb");
+    u32 linked = 0;
+
+    if (file == NULL)
+        return 0;
+    if (fread(&linked, sizeof(linked), 1, file) != 1)
+        linked = 0;
+    fclose(file);
+    return linked != 0 ? (u32)(uintptr_t)&AgbMain - linked : 0;
+}
+
 static bool LoadAssetMap(void)
 {
     u32 indexBytes = 0, ptrBytes = 0;
     void *index;
     void *ptrIndex;
-    u32 i;
+    u32 i, delta;
 
     if (sTried)
         return sLoaded;
@@ -146,6 +168,9 @@ static bool LoadAssetMap(void)
 
     sEntries = index;
     sEntryCount = indexBytes / sizeof(struct AssetMapEntry);
+    delta = LoadDelta();
+    for (i = 0; i < sEntryCount && delta != 0; i++)
+        sEntries[i].addr += delta;
 
     /* The pointer map is optional: a build with no grouped INCBIN has none. */
     ptrIndex = ReadWholeFile(ASSET_PTR_INDEX_PATH, &ptrBytes);
@@ -153,6 +178,11 @@ static bool LoadAssetMap(void)
     {
         sPtrEntries = ptrIndex;
         sPtrEntryCount = ptrBytes / sizeof(struct AssetPtrMapEntry);
+        for (i = 0; i < sPtrEntryCount && delta != 0; i++)
+        {
+            sPtrEntries[i].ptr += delta;
+            sPtrEntries[i].base += delta;
+        }
     }
     else
     {

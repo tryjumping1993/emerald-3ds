@@ -94,8 +94,42 @@ def parse_incbins_by_source() -> list[tuple[Path, str, list[str], bool]]:
     return result
 
 
+LLD_SECTION = re.compile(r"^\s*([0-9a-fA-F]+)\s+[0-9a-fA-F]+\s+[0-9a-fA-F]+\s+\d+\s+(build/root/\S+\.o):\(\.rodata\.([A-Za-z_][A-Za-z0-9_]*)\)\s*$")
+LLD_AGBMAIN = re.compile(r"^\s*([0-9a-fA-F]+)\s+[0-9a-fA-F]+\s+[0-9a-fA-F]+\s+\d+\s+AgbMain\s*$")
+
+
+def parse_symbol_addresses_from_lld_map(lines: list[str]) -> tuple[dict[tuple[str, str], int], dict[str, list[tuple[str, int]]]]:
+    """The same table from lld's map (the Android library's link): one line per input
+    section, `VMA LMA Size Align  path.o:(.rodata.symbol)`. Also writes the link-time
+    address of AgbMain (the reference the bundles use) beside the index, which the library
+    rebases it by when it is loaded somewhere else (3ds_assets.c, LoadDelta)."""
+    symbols: dict[tuple[str, str], int] = {}
+    symbols_by_name: dict[str, list[tuple[str, int]]] = {}
+    reference = None
+    for line in lines:
+        m = LLD_SECTION.match(line)
+        if m:
+            addr = int(m.group(1), 16)
+            obj = m.group(2).replace("\\", "/")
+            if addr != 0:
+                symbols[(obj, m.group(3))] = addr
+                symbols_by_name.setdefault(m.group(3), []).append((obj, addr))
+            continue
+        m = LLD_AGBMAIN.match(line)
+        if m and reference is None:
+            reference = int(m.group(1), 16)
+    if reference is None:
+        raise SystemExit("gen_asset_table: AgbMain is not in the map")
+    base = FS_DIR / "assets" / "asset_base.bin"
+    base.parent.mkdir(parents=True, exist_ok=True)
+    base.write_bytes(struct.pack("<I", reference))
+    return symbols, symbols_by_name
+
+
 def parse_symbol_addresses_from_map() -> tuple[dict[tuple[str, str], int], dict[str, list[tuple[str, int]]]]:
     lines = MAP_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
+    if lines and lines[0].lstrip().startswith("VMA") and "LMA" in lines[0]:
+        return parse_symbol_addresses_from_lld_map(lines)
     symbols: dict[tuple[str, str], int] = {}
     symbols_by_name: dict[str, list[tuple[str, int]]] = {}
 

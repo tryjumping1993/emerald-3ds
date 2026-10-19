@@ -451,7 +451,13 @@ VOXEL_GFX_OUTPUTS := $(patsubst %.png,%.4bpp,$(filter %.png,$(VOXEL_GFX_SOURCES)
 VOXEL_GFX_OUTPUTS += $(patsubst %.pal,%.gbapal,$(filter %.pal,$(VOXEL_GFX_SOURCES)))
 ifneq ($(strip $(VOXEL_GFX_OUTPUTS)),)
 $(VOXEL_GFX_OUTPUTS) &: $(VOXEL_GFX_SOURCES)
+ifeq ($(MID_CHUNK),0)
 	+$(MAKE) -C $(ROOT) $(patsubst $(ROOT)/%,%,$(VOXEL_GFX_OUTPUTS))
+else
+	@mkdir -p build
+	$(file >build/gfx.list,$(patsubst $(ROOT)/%,%,$(VOXEL_GFX_OUTPUTS)))
+	tr -d '\015' < build/gfx.list | xargs -n $(MID_CHUNK) $(MAKE) -C $(ROOT)
+endif
 romfs/voxel/regions.bin romfs/voxel/signposts.bin romfs/voxel/buildings.bin romfs/voxel/relief.bin romfs/stage/leaves.bin: $(VOXEL_GFX_OUTPUTS)
 endif
 

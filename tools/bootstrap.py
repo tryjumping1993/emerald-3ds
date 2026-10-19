@@ -157,8 +157,10 @@ def main() -> int:
     for name in OVERLAY:
         src = ROOT / name
         if src.exists():
+            # android_port/app, host_test and their Gradle state belong to the APK build, not to this tree.
             shutil.copytree(src, tree / name, dirs_exist_ok=True,
-                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "build", "dist"))
+                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "build", "dist", ".gradle", ".cxx",
+                                                          "app", "host_test", "gradle", "local.properties"))
     shutil.copy2(ROOT / "upstream.lock", tree / "upstream.lock")
     print("bootstrap: tree ready at %s" % tree)
 
