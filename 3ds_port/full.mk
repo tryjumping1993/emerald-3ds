@@ -13,11 +13,11 @@ PREPROC := $(abspath $(ROOT)/tools/preproc/preproc$(EXESUFFIX))
 MAPJSON := $(abspath $(ROOT)/tools/mapjson/mapjson$(EXESUFFIX))
 WAV2AGB := $(abspath $(ROOT)/tools/wav2agb/wav2agb$(EXESUFFIX))
 SCANINC := $(abspath $(ROOT)/tools/scaninc/scaninc$(EXESUFFIX))
-GAME_ARCH := $(ARCH)
-ASM_PSEUDO_OP_CONV := sed -e 's/\.4byte/\.int/g;s/\.2byte/\.short/g'
-AS := $(DEVKITARM)/bin/arm-none-eabi-as
-CPPTOOL := $(DEVKITARM)/bin/arm-none-eabi-cpp
-ASFLAGS := -mcpu=mpcore --defsym MODERN=1 --defsym PORTABLE=1 --defsym UBFIX=1 -I$(ROOT)
+GAME_ARCH ?= $(ARCH)
+ASM_PSEUDO_OP_CONV ?= sed -e 's/\.4byte/\.int/g;s/\.2byte/\.short/g'
+AS ?= $(DEVKITARM)/bin/arm-none-eabi-as
+CPPTOOL ?= $(DEVKITARM)/bin/arm-none-eabi-cpp
+ASFLAGS ?= -mcpu=mpcore --defsym MODERN=1 --defsym PORTABLE=1 --defsym UBFIX=1 -I$(ROOT)
 
 # Game translation units see the port bridge (compat/port_platform.h): the
 # hooks in the shared tree that route resources, scripts and saves to the
@@ -313,8 +313,17 @@ build/root/sound/songs/%.o: $(ROOT)/sound/songs/%.s
 # for the options to drift, so the conversion is delegated to it - in one call
 # for every song, because each recursive make parses the whole root Makefile.
 ROOT_MID_DEPS := $(wildcard $(ROOT)/sound/songs/midi/*.mid) $(ROOT)/sound/songs/midi/midi.cfg
+# MID_CHUNK > 0 hands the root make that many songs at a time instead (a host whose
+# command lines are limited, like Windows' 32 KiB, cannot take all of them at once).
+MID_CHUNK ?= 0
 build/midi.stamp: $(ROOT_MID_DEPS)
+ifeq ($(MID_CHUNK),0)
 	+$(MAKE) -C $(ROOT) $(patsubst $(ROOT)/%,%,$(ROOT_MID_SRCS))
+else
+	@mkdir -p build
+	$(file >build/midi.list,$(patsubst $(ROOT)/%,%,$(ROOT_MID_SRCS)))
+	tr -d '\015' < build/midi.list | xargs -n $(MID_CHUNK) $(MAKE) -C $(ROOT)
+endif
 	@mkdir -p build
 	@touch $@
 # Order-only: the root make leaves an up-to-date .s untouched, so the stamp is

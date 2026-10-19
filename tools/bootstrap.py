@@ -37,7 +37,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-OVERLAY = ["3ds_port", "builder", "tools"]
+OVERLAY = ["3ds_port", "android_port", "builder", "tools"]
 
 if "/opt/devkitpro" not in os.environ.get("PATH", ""):
     extra_paths = [p for p in ("/opt/homebrew/opt/make/libexec/gnubin", "/opt/homebrew/bin",
