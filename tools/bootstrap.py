@@ -71,6 +71,8 @@ def fetch(tree: Path, repo: str, commit: str) -> None:
     if not (tree / ".git").exists():
         run(["git", "init", "-q"], cwd=tree)
         run(["git", "remote", "add", "origin", repo], cwd=tree)
+        # Patches are generated with LF endings: never let a checkout convert them (Windows autocrlf).
+        run(["git", "config", "core.autocrlf", "false"], cwd=tree)
     run(["git", "fetch", "-q", "--depth", "1", "origin", commit], cwd=tree)
     run(["git", "checkout", "-q", "--force", "--detach", commit], cwd=tree)
 
