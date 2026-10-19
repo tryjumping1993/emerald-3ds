@@ -36,7 +36,7 @@ SCRIPTS := ../tools/port_common
 EXESUFFIX := .exe
 TARGET := emerald3ds
 APP_VERSION := 0.4.0
-VOXEL ?= 1
+VOXEL ?= 0
 VOXEL_LIGHTING ?= 1
 SHOW_FPS ?= 1
 DATA_BACKEND ?= 0
@@ -67,3 +67,26 @@ GAME_UNITS := $(FULL_C_OBJS) $(FULL_DATA_OBJS) $(filter-out build/ctr_voxel.o,$(
 .PHONY: game-objs
 game-objs: $(GAME_UNITS)
 -include $(GAME_UNITS:.o=.d)
+
+# ── The native units: the port's reusable backend over the shim (include/3ds.h), and the
+# Android ones. Built without the game's preprocessing: they never see the game headers.
+NATIVE_CPPFLAGS := -DPORTABLE -DPLATFORM_3DS -DPLATFORM_ANDROID -DCTR_VOXEL_ENABLED=$(VOXEL)
+NATIVE_CPPFLAGS += -DCTR_VOXEL_LIGHTING=$(VOXEL_LIGHTING) -DCTR_SHOW_FPS=$(SHOW_FPS) -DCTR_DATA_BACKEND=$(DATA_BACKEND)
+NATIVE_CPPFLAGS += -Iinclude -I$(ANDROID_ROOT)/include
+NATIVE_CFLAGS := $(filter-out -Werror,$(CFLAGS)) -fvisibility=hidden
+REUSED_SRCS := 3ds_log 3ds_platform 3ds_input 3ds_input_decode 3ds_fs 3ds_data 3ds_pak 3ds_settings \
+	3ds_prof 3ds_scenario 3ds_daynight 3ds_clock_store 3ds_encounters 3ds_field_view 3ds_video_decode
+ANDROID_SRCS := $(patsubst $(ANDROID_ROOT)/src/%.c,%,$(wildcard $(ANDROID_ROOT)/src/*.c))
+NATIVE_OBJS := $(patsubst %,build/native/%.o,$(REUSED_SRCS)) $(patsubst %,build/android/%.o,$(ANDROID_SRCS))
+
+build/native/%.o: src/%.c Makefile $(ANDROID_ROOT)/Makefile
+	@mkdir -p $(dir $@)
+	"$(CC)" $(NATIVE_CPPFLAGS) $(NATIVE_CFLAGS) -MMD -MP -c $< -o $@
+
+build/android/%.o: $(ANDROID_ROOT)/src/%.c $(ANDROID_ROOT)/Makefile
+	@mkdir -p $(dir $@)
+	"$(CC)" $(NATIVE_CPPFLAGS) $(NATIVE_CFLAGS) -MMD -MP -c $< -o $@
+
+.PHONY: native-objs
+native-objs: $(NATIVE_OBJS)
+-include $(NATIVE_OBJS:.o=.d)
