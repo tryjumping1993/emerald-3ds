@@ -47,6 +47,11 @@ typedef enum { GPU_TEVSCALE_1 = 0, GPU_TEVSCALE_2, GPU_TEVSCALE_4 } GPU_TEVSCALE
 typedef enum { GPU_CULL_NONE = 0, GPU_CULL_FRONT_CCW, GPU_CULL_BACK_CCW } GPU_CULLMODE;
 
 typedef enum { C3D_RGB = 1, C3D_Alpha = 2, C3D_Both = 3 } C3D_TexEnvMode;
+typedef enum { GPU_VERTEX_SHADER = 0, GPU_GEOMETRY_SHADER = 1 } GPU_SHADER_TYPE;
+typedef enum { GPU_LOGICOP_CLEAR = 0, GPU_LOGICOP_AND, GPU_LOGICOP_AND_REVERSE, GPU_LOGICOP_COPY, GPU_LOGICOP_SET,
+               GPU_LOGICOP_COPY_INVERTED, GPU_LOGICOP_NOOP, GPU_LOGICOP_INVERT } GPU_LOGICOP;
+#define GPU_TEX_2D 0
+#define GPU_TEXTURE_MODE(m) (((u32)(m) & 7u) << 28)
 
 /* ── Types ──────────────────────────────────────────────────────────────── */
 typedef struct
@@ -62,6 +67,9 @@ typedef struct
     bool linked;               /* a render target draws into it: the GL texture is the truth */
     u8 *dirtyTiles;            /* a bit per 8x8 tile the compositor has written since the last upload */
     bool touched;
+    u32 param;                 /* the PICA's texture mode bits (GPU_TEXTURE_MODE); only the voxel world sets it */
+    u32 scanned;               /* the frame whose texels were last compared with what the GL holds (see TexReady) */
+    bool lazy;                 /* made by the first draw over memory the voxel world carved out, written through copies and flushes only */
 } C3D_Tex;
 
 typedef struct
@@ -96,9 +104,9 @@ typedef struct
 } C3D_TexEnv;
 
 /* A vector as the PICA holds it: w first in memory (x last). */
-typedef struct { float w, z, y, x; } C3D_FVec;
+typedef union { struct { float w, z, y, x; }; float c[4]; } C3D_FVec;
 typedef union { C3D_FVec r[4]; float m[16]; } C3D_Mtx;
-static inline C3D_FVec FVec4_New(float x, float y, float z, float w) { return (C3D_FVec){ w, z, y, x }; }
+static inline C3D_FVec FVec4_New(float x, float y, float z, float w) { C3D_FVec v = { .w = w, .z = z, .y = y, .x = x }; return v; }
 static inline C3D_FVec FVec4_Scale(C3D_FVec v, float s) { return FVec4_New(v.x * s, v.y * s, v.z * s, v.w * s); }
 
 #define C3D_MAX_ATTRIBS 12
@@ -193,6 +201,54 @@ void C3D_FixedAttribSet(int id, float x, float y, float z, float w);
 void C3D_DrawElements(GPU_Primitive_t primitive, int count, int type, const void *indices);
 
 void Mtx_Identity(C3D_Mtx *out);
+
+/* ── Matrices and vectors (citro3d's math, right handed, in the PICA's clip space: x and y in
+ *    [-w, w], z in [-w, 0] from the near plane to the far one) ────────────────────────────── */
+typedef struct { float x, y, z; } C3D_FVec3;
+static inline C3D_FVec3 FVec3_New(float x, float y, float z) { C3D_FVec3 v = { x, y, z }; return v; }
+static inline float C3D_AngleFromDegrees(float degrees) { return degrees * 3.14159265358979f / 180.0f; }
+static inline void Mtx_Zeros(C3D_Mtx *out) { memset(out, 0, sizeof(*out)); }
+static inline void Mtx_Copy(C3D_Mtx *out, const C3D_Mtx *in) { *out = *in; }
+static inline float FVec4_Dot(C3D_FVec a, C3D_FVec b) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
+void Mtx_Multiply(C3D_Mtx *out, const C3D_Mtx *a, const C3D_Mtx *b);
+C3D_FVec Mtx_MultiplyFVec4(const C3D_Mtx *mtx, C3D_FVec v);
+void Mtx_Translate(C3D_Mtx *mtx, float x, float y, float z, bool bRightSide);
+void Mtx_Persp(C3D_Mtx *mtx, float fovy, float aspect, float near, float far, bool isLeftHanded);
+void Mtx_Ortho(C3D_Mtx *mtx, float left, float right, float bottom, float top, float near, float far, bool isLeftHanded);
+void Mtx_LookAt(C3D_Mtx *out, C3D_FVec3 cameraPosition, C3D_FVec3 cameraTarget, C3D_FVec3 cameraUpVector, bool isLeftHanded);
+
+/* ── Shader programs. The voxel world's vertex shader (voxel.v.pica) is a GLSL twin inside
+ *    c3d_gles.c: the binary is not read, its uniforms are the PICA's register numbers. ─────── */
+typedef struct { int unused; } DVLE_s;
+typedef struct { u32 numDVLE; DVLE_s *DVLE; } DVLB_s;
+typedef struct { void *vertexShader; } shaderProgram_s;
+DVLB_s *DVLB_ParseFile(const void *shbin, u32 size);
+void DVLB_Free(DVLB_s *dvlb);
+void shaderProgramInit(shaderProgram_s *program);
+Result shaderProgramSetVsh(shaderProgram_s *program, DVLE_s *vsh);
+Result shaderProgramFree(shaderProgram_s *program);
+int shaderInstanceGetUniformLocation(void *instance, const char *name);
+void C3D_BindProgram(shaderProgram_s *program);
+void C3D_FVUnifSet(GPU_SHADER_TYPE type, int id, float x, float y, float z, float w);
+void C3D_FVUnifMtx4x4(GPU_SHADER_TYPE type, int id, const C3D_Mtx *mtx);
+void C3D_DrawArrays(GPU_Primitive_t primitive, int first, int size);
+/* d = zScale * (z / w) + zOffset is the depth the tests compare. */
+void C3D_DepthMap(bool bIsZBuffer, float zScale, float zOffset);
+void C3D_ColorLogicOp(GPU_LOGICOP op);
+
+/* ── Memory the voxel world manages itself ─────────────────────────────────────────────────
+ * VRAM is ordinary memory here; blocks drawn from as vertex buffers are mirrored in a GL buffer,
+ * and the copies and cache flushes below say which bytes changed (of a texture's texels or of a
+ * mirrored block). */
+void *vramAlloc(size_t size);
+void vramFree(void *memory);
+void GSPGPU_FlushDataCache(const void *address, u32 size);
+void C3D_SyncTextureCopy(const u32 *inadr, u32 indim, u32 *outadr, u32 outdim, u32 size, u32 flags);
+
+/* ctr_voxel.c asks the console for VRAM textures it fills itself: here they are CPU textures. */
+#ifdef CTR_TEXINITVRAM_CPU
+#define C3D_TexInitVRAM C3D_TexInit
+#endif
 
 /* ── What the console needs and the Thor does not ────────────────────────── */
 /* Raw command list writes the compositor made to drop the texture cache and flush the

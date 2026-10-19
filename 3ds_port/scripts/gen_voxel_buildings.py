@@ -3219,7 +3219,10 @@ MAX_TEXTURE_SIDE = 1024    # the GPU's largest texture
 
 
 def texel_offset(x, y, width):
-    """8x8 Morton tiles, the PICA200 order (as gen_voxel_trees.py)."""
+    """8x8 tiles, the PICA200's Morton order inside a tile or rows (CTR_TEXEL_ORDER=rows, as
+    gen_voxel_trees.py)."""
+    if os.environ.get("CTR_TEXEL_ORDER") == "rows":
+        return ((y // 8) * (width // 8) + x // 8) * 64 + (y & 7) * 8 + (x & 7)
     morton = 0
     for bit in range(3):
         morton |= ((x >> bit) & 1) << (2 * bit) | ((y >> bit) & 1) << (2 * bit + 1)

@@ -51,6 +51,10 @@ GAMECFLAGS += -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -W
 LDFLAGS :=
 MID_CHUNK := 60
 -include local.mk
+# The voxel world's vertex shader is GLSL inside c3d_gles.c: no picasso, no shader binary.
+PORT_NO_PICASSO := 1
+# Texture data the generators write is read as CtrVideo_Texel orders it: rows inside a tile here.
+export CTR_TEXEL_ORDER := rows
 include full.mk
 
 # The software renderer of phase 1 is compiled out of the game tree unless asked for.
@@ -82,6 +86,18 @@ REUSED_SRCS := 3ds_log 3ds_input 3ds_input_decode 3ds_fs 3ds_data 3ds_pak 3ds_se
 	3ds_prof 3ds_scenario 3ds_daynight 3ds_clock_store 3ds_encounters 3ds_field_view 3ds_video_decode 3ds_video
 ANDROID_SRCS := $(patsubst $(ANDROID_ROOT)/src/%.c,%,$(wildcard $(ANDROID_ROOT)/src/*.c))
 NATIVE_OBJS := $(patsubst %,build/native/%.o,$(REUSED_SRCS)) $(patsubst %,build/android/%.o,$(ANDROID_SRCS))
+
+# The voxel world is native too (it owns the Citro3D objects); it asks for VRAM textures it fills itself.
+ifeq ($(VOXEL),1)
+NATIVE_OBJS += build/native/ctr_voxel.o
+build/native/ctr_voxel.o: src/voxel/ctr_voxel.c Makefile $(ANDROID_ROOT)/Makefile
+	@mkdir -p $(dir $@)
+	"$(CC)" $(NATIVE_CPPFLAGS) -Isrc/voxel -DCTR_TEXINITVRAM_CPU $(NATIVE_CFLAGS) -MMD -MP -c $< -o $@
+
+romfs/shaders/voxel.shbin:
+	@mkdir -p $(dir $@)
+	printf 'DVLB' > $@
+endif
 
 build/native/%.o: src/%.c Makefile $(ANDROID_ROOT)/Makefile
 	@mkdir -p $(dir $@)

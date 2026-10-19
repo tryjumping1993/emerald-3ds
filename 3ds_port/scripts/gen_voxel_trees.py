@@ -2,6 +2,7 @@
 """Pack the voxel tree artwork as a small, GPU-ready RGBA5551 texture."""
 
 import argparse
+import os
 from pathlib import Path
 import struct
 
@@ -17,9 +18,13 @@ SOURCES = (("tree_crown.png", (32, 36), (0, 0)),
 
 
 def texel_offset(x, y):
-    """8x8 Morton tiles, matching CtrVideo_Texel (top row is v=1)."""
-    morton = sum(((x >> bit) & 1) << (2 * bit) |
-                 ((y >> bit) & 1) << (2 * bit + 1) for bit in range(3))
+    """8x8 tiles, matching CtrVideo_Texel (top row is v=1): the PICA's Morton order inside a
+    tile, or rows when CTR_TEXEL_ORDER=rows (the Thor, which uploads untiled textures)."""
+    if os.environ.get("CTR_TEXEL_ORDER") == "rows":
+        morton = (y & 7) * 8 + (x & 7)
+    else:
+        morton = sum(((x >> bit) & 1) << (2 * bit) |
+                     ((y >> bit) & 1) << (2 * bit + 1) for bit in range(3))
     return ((y // 8) * (DIM // 8) + x // 8) * 64 + morton
 
 

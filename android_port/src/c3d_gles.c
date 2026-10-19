@@ -81,6 +81,15 @@ static struct
     C3D_TexEnv env[6];
     C3D_Tex *bound;
 
+    /* The voxel world's program (voxel.v.pica's GLSL twin) and what it draws with: three texture
+     * units, the vertex shader's register file, the depth mapping. */
+    GLuint voxProgram, voxVao, voxStream;
+    GLint voxReg, voxDepth, voxTex[3], voxStages, voxSrc, voxSrcA, voxOp, voxOpA, voxConst, voxAlphaFunc, voxAlphaRef;
+    float regs[32][4];
+    float depthScale, depthOffset;
+    bool voxelBound;
+    u32 frameNo;
+
     /* Attributes for raw draws. */
     C3D_AttrInfo attrInfo;
     C3D_BufInfo bufInfo;
@@ -94,6 +103,7 @@ static struct
 } G;
 
 static void FlushBatch(void);
+static bool BuildVoxelProgram(void);
 
 static C3D_Tex *sTextures[REGISTRY];
 static C3D_RenderTarget *sTargets[REGISTRY];
@@ -352,6 +362,7 @@ static TexFormat FormatOf(GPU_TEXCOLOR fmt)
     case GPU_RGB565: return (TexFormat){ GL_RGB565, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, 2, 2 };
     case GPU_RGBA4: return (TexFormat){ GL_RGBA4, GL_RGBA, GL_UNSIGNED_SHORT_4_4_4_4, 2, 2 };
     case GPU_A8: return (TexFormat){ GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, 1, 4 };
+    case GPU_L8: return (TexFormat){ GL_R8, GL_RED, GL_UNSIGNED_BYTE, 1, 1 };
     default: return (TexFormat){ GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, 4, 4 };
     }
 }
@@ -402,6 +413,9 @@ bool C3D_Init(size_t cmdBufSize)
     memset(&G, 0, sizeof(G));
     if (!BuildProgram())
         return false;
+    G.depthScale = -1.0f;
+    G.depthOffset = 0.0f;
+    BuildVoxelProgram();
     for (unsigned q = 0; q < MAX_QUADS; ++q)
     {
         unsigned short base = (unsigned short)(q * 4);
@@ -466,7 +480,16 @@ void C2D_Fini(void) {}
 
 static void TexApplyParams(C3D_Tex *tex)
 {
+    if (tex->glTexture == 0)
+        return;
     glBindTexture(GL_TEXTURE_2D, tex->glTexture);
+    if (tex->fmt == GPU_L8)
+    {
+        /* Luminance: the one channel is red, green and blue; alpha is opaque. */
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, GL_RED);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, GL_RED);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
+    }
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, FilterOf(tex->filterMag));
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, FilterOf(tex->filterMin));
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, WrapOf(tex->wrapS));
@@ -570,7 +593,7 @@ typedef struct
     bool uploaded;
 } Shadow;
 
-static Shadow sShadow[32];
+static Shadow sShadow[160];
 
 static Shadow *ShadowFor(C3D_Tex *tex)
 {
@@ -613,6 +636,9 @@ static inline void ConvertTexel(const u8 *source, u8 *destination, GPU_TEXCOLOR 
     case GPU_A8:
         destination[0] = destination[1] = destination[2] = 0;
         destination[3] = source[0];
+        break;
+    case GPU_L8:
+        destination[0] = source[0];
         break;
     case GPU_RGB8:
         destination[0] = source[2];
@@ -708,10 +734,17 @@ void C3D_TexTouch(C3D_Tex *tex, size_t offset, size_t size)
     tex->touched = true;
 }
 
+/* ctr_voxel.c turns a texture unit off by writing citro3d's own context (the unit's slot, at
+ * C3DI_CONTEXT_TEX): the bound textures live in this array, in that layout, so that it can. */
+uint8_t __C3D_Context[0x400];
+#define CONTEXT_UNITS ((C3D_Tex **)(void *)(__C3D_Context + 0x118))
+
 void C3D_TexBind(int unit, C3D_Tex *tex)
 {
-    (void)unit;
-    G.bound = tex;
+    if (unit >= 0 && unit < 3)
+        CONTEXT_UNITS[unit] = tex;
+    if (unit == 0)
+        G.bound = tex;
 }
 
 /* ── Render targets ──────────────────────────────────────────────────────── */
@@ -1084,7 +1117,9 @@ static void ApplyTarget(void)
     glViewport(0, 0, G.viewportW, G.viewportH);
 }
 
-static void UploadEnv(void)
+/* The six stages as uniforms of the program whose locations are given; the voxel world's has no
+ * Citro2D stage and no mode. */
+static void FillEnv(GLint uSrc, GLint uSrcA, GLint uOp, GLint uOpA, GLint uConst, GLint uStages, bool voxel)
 {
     GLint src[24], srcA[24], op[24], opA[24];
     float constants[24];
@@ -1115,20 +1150,27 @@ static void UploadEnv(void)
         constants[i * 4 + 1] = (float)((e->color >> 8) & 255) / 255.0f;
         constants[i * 4 + 2] = (float)((e->color >> 16) & 255) / 255.0f;
         constants[i * 4 + 3] = (float)((e->color >> 24) & 255) / 255.0f;
-        if (i != 0 ? !TexEnvIsDefault(e) : (G.mode == MODE_RAW || e->funcRgb == ENV_C2D))
+        if (voxel ? !TexEnvIsDefault(e) : i != 0 ? !TexEnvIsDefault(e) : (G.mode == MODE_RAW || e->funcRgb == ENV_C2D))
             stages = i + 1;
     }
     /* Stage 0 is Citro2D's for sprites and solids; later stages are the compositor's. */
-    if (G.mode == MODE_RAW && stages == 0)
+    if (!voxel && G.mode == MODE_RAW && stages == 0)
         stages = 1;
-    glUniform4iv(G.uSrc, 6, src);
-    glUniform4iv(G.uSrcA, 6, srcA);
-    glUniform4iv(G.uOp, 6, op);
-    glUniform4iv(G.uOpA, 6, opA);
-    glUniform4fv(G.uConst, 6, constants);
-    glUniform1i(G.uStages, stages);
+    glUniform4iv(uSrc, 6, src);
+    glUniform4iv(uSrcA, 6, srcA);
+    glUniform4iv(uOp, 6, op);
+    glUniform4iv(uOpA, 6, opA);
+    glUniform4fv(uConst, 6, constants);
+    glUniform1i(uStages, stages);
+}
+
+static void UploadEnv(void)
+{
+    FillEnv(G.uSrc, G.uSrcA, G.uOp, G.uOpA, G.uConst, G.uStages, false);
     glUniform1i(G.uMode, (int)G.mode);
 }
+
+static void ApplyPipeline(void);
 
 static void ApplyState(void)
 {
@@ -1148,7 +1190,12 @@ static void ApplyState(void)
 
     glUniform1i(G.uAlphaFunc, G.alphaTest ? (int)G.alphaFunc : (int)GPU_ALWAYS);
     glUniform1f(G.uAlphaRef, (float)G.alphaRef / 255.0f);
+    ApplyPipeline();
+}
 
+/* Blending, the depth test, the write mask and the scissor, whichever program draws. */
+static void ApplyPipeline(void)
+{
     glEnable(GL_BLEND);
     glBlendEquationSeparate(BlendEquation(G.colorEq), BlendEquation(G.alphaEq));
     glBlendFuncSeparate(BlendFactor(G.srcColor), BlendFactor(G.dstColor), BlendFactor(G.srcAlpha), BlendFactor(G.dstAlpha));
@@ -1270,6 +1317,7 @@ bool C3D_FrameBegin(u8 flags)
     AndroidHost_GlMakeCurrent();
     G.inFrame = true;
     G.quads = 0;
+    ++G.frameNo;
     return true;
 }
 
@@ -1735,4 +1783,625 @@ void C3D_DrawElements(GPU_Primitive_t primitive, int count, int type, const void
     CountDraw(G.target, true, (unsigned)count / 6);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, G.ibo);
     G.mode = MODE_IMAGE;
+}
+
+/* ══ The voxel world: a programmable vertex stage, three texture units, memory it manages itself ══ */
+
+/* ── Matrices ────────────────────────────────────────────────────────────── */
+
+static inline float *Element(C3D_Mtx *m, int row, int col) { return &m->r[row].c[3 - col]; }
+static inline float ElementOf(const C3D_Mtx *m, int row, int col) { return m->r[row].c[3 - col]; }
+
+void Mtx_Multiply(C3D_Mtx *out, const C3D_Mtx *a, const C3D_Mtx *b)
+{
+    C3D_Mtx result;
+
+    for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 4; ++j)
+        {
+            float sum = 0.0f;
+
+            for (int k = 0; k < 4; ++k)
+                sum += ElementOf(a, i, k) * ElementOf(b, k, j);
+            *Element(&result, i, j) = sum;
+        }
+    *out = result;
+}
+
+C3D_FVec Mtx_MultiplyFVec4(const C3D_Mtx *mtx, C3D_FVec v)
+{
+    return FVec4_New(FVec4_Dot(mtx->r[0], v), FVec4_Dot(mtx->r[1], v), FVec4_Dot(mtx->r[2], v), FVec4_Dot(mtx->r[3], v));
+}
+
+void Mtx_Translate(C3D_Mtx *mtx, float x, float y, float z, bool bRightSide)
+{
+    C3D_FVec v = FVec4_New(x, y, z, 1.0f);
+
+    if (bRightSide)
+        for (int i = 0; i < 4; ++i)
+            mtx->r[i].w = FVec4_Dot(mtx->r[i], v);
+    else
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 4; ++j)
+                mtx->r[i].c[j] += mtx->r[3].c[j] * v.c[3 - i];
+}
+
+void Mtx_Persp(C3D_Mtx *mtx, float fovy, float aspect, float near, float far, bool isLeftHanded)
+{
+    float tangent = tanf(fovy / 2.0f);
+
+    Mtx_Zeros(mtx);
+    mtx->r[0].x = 1.0f / (tangent * aspect);
+    mtx->r[1].y = 1.0f / tangent;
+    if (isLeftHanded)
+    {
+        mtx->r[2].z = near / (far - near);
+        mtx->r[2].w = -near * far / (far - near);
+        mtx->r[3].z = 1.0f;
+    }
+    else
+    {
+        mtx->r[2].z = near / (near - far);
+        mtx->r[2].w = far * near / (near - far);
+        mtx->r[3].z = -1.0f;
+    }
+}
+
+void Mtx_Ortho(C3D_Mtx *mtx, float left, float right, float bottom, float top, float near, float far, bool isLeftHanded)
+{
+    Mtx_Zeros(mtx);
+    mtx->r[0].x = 2.0f / (right - left);
+    mtx->r[0].w = (left + right) / (left - right);
+    mtx->r[1].y = 2.0f / (top - bottom);
+    mtx->r[1].w = (bottom + top) / (bottom - top);
+    mtx->r[2].z = (isLeftHanded ? 1.0f : -1.0f) / (far - near);
+    mtx->r[2].w = 0.5f * (near + far) / (near - far) - 0.5f;
+    mtx->r[3].w = 1.0f;
+}
+
+static C3D_FVec3 Cross3(C3D_FVec3 a, C3D_FVec3 b) { return FVec3_New(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x); }
+
+static C3D_FVec3 Normalize3(C3D_FVec3 v)
+{
+    float length = sqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
+
+    return length > 0.0f ? FVec3_New(v.x / length, v.y / length, v.z / length) : v;
+}
+
+void Mtx_LookAt(C3D_Mtx *out, C3D_FVec3 position, C3D_FVec3 target, C3D_FVec3 up, bool isLeftHanded)
+{
+    C3D_FVec3 lz = Normalize3(FVec3_New(position.x - target.x, position.y - target.y, position.z - target.z)), lx, ly;
+
+    if (isLeftHanded)
+        lz = FVec3_New(-lz.x, -lz.y, -lz.z);
+    lx = Normalize3(Cross3(up, lz));
+    ly = Normalize3(Cross3(lz, lx));
+    out->r[0] = FVec4_New(lx.x, lx.y, lx.z, -(lx.x * position.x + lx.y * position.y + lx.z * position.z));
+    out->r[1] = FVec4_New(ly.x, ly.y, ly.z, -(ly.x * position.x + ly.y * position.y + ly.z * position.z));
+    out->r[2] = FVec4_New(lz.x, lz.y, lz.z, -(lz.x * position.x + lz.y * position.y + lz.z * position.z));
+    out->r[3] = FVec4_New(0.0f, 0.0f, 0.0f, 1.0f);
+}
+
+/* ── The program ─────────────────────────────────────────────────────────── */
+
+/* voxel.v.pica: positions in 1/512 tile and a shade in 1/16384 as four shorts, a texture
+ * coordinate; per vertex the colour grade, the haze weight (in alpha) and the sun dapples'
+ * coordinates. The register file is the PICA's: projection 0..3, modelView 4..7, shadeTint 8,
+ * tintDiff 9, grade 10, fog 11, dappleU 12, dappleV 13. The depth is the PICA's (zScale * z / w +
+ * zOffset, larger is nearer) put in GL's window range. */
+static const char kVoxelVertexShader[] =
+    "#version 300 es\n"
+    "layout(location = 0) in vec4 aPos;\n"
+    "layout(location = 1) in vec2 aUv;\n"
+    "uniform vec4 uReg[14];\n"
+    "uniform vec2 uDepth;\n"
+    "out vec2 vTc0;\n"
+    "out vec2 vTc1;\n"
+    "out vec2 vTc2;\n"
+    "out vec4 vColor;\n"
+    "void main() {\n"
+    "    vec4 p = vec4(aPos.xyz * 0.001953125, 1.0);\n"
+    "    vec4 v = vec4(dot(uReg[4], p), dot(uReg[5], p), dot(uReg[6], p), dot(uReg[7], p));\n"
+    "    vec4 c = vec4(dot(uReg[0], v), dot(uReg[1], v), dot(uReg[2], v), dot(uReg[3], v));\n"
+    "    gl_Position = vec4(c.xy, 2.0 * uDepth.x * c.z + (2.0 * uDepth.y - 1.0) * c.w, c.w);\n"
+    "    vTc0 = aUv;\n"
+    "    vTc2 = aUv;\n"
+    "    vTc1 = vec2(dot(uReg[12], p), dot(uReg[13], p));\n"
+    "    float shade = aPos.w * 0.00006103515625;\n"
+    "    float t = clamp(shade * uReg[10].x + uReg[10].y, 0.0, 1.0);\n"
+    "    vec3 tint = shade * (uReg[8].xyz + uReg[9].xyz * t);\n"
+    "    float haze = clamp(uReg[11].x * v.z + uReg[11].y, 0.0, uReg[11].z);\n"
+    "    vColor = clamp(vec4(tint, 1.0 - haze), 0.0, 1.0);\n"
+    "}\n";
+
+static const char kVoxelFragmentHead[] =
+    "#version 300 es\n"
+    "precision highp float;\n"
+    "uniform sampler2D uTex0;\n"
+    "uniform sampler2D uTex1;\n"
+    "uniform sampler2D uTex2;\n"
+    "uniform int uStages;\n"
+    "uniform ivec4 uSrc[6];\n"
+    "uniform ivec4 uSrcA[6];\n"
+    "uniform ivec4 uOp[6];\n"
+    "uniform ivec4 uOpA[6];\n"
+    "uniform vec4 uConst[6];\n"
+    "uniform int uAlphaFunc;\n"
+    "uniform float uAlphaRef;\n"
+    "in vec2 vTc0;\n"
+    "in vec2 vTc1;\n"
+    "in vec2 vTc2;\n"
+    "in vec4 vColor;\n"
+    "out vec4 fragColor;\n"
+    "vec4 source(int s, vec4 prev, vec4 t0, vec4 t1, vec4 t2, vec4 cst) {\n"
+    "    if (s == 3) return t0;\n"
+    "    if (s == 4) return t1;\n"
+    "    if (s == 5) return t2;\n"
+    "    if (s == 14) return cst;\n"
+    "    if (s == 15) return prev;\n"
+    "    return vColor;\n"
+    "}\n";
+
+static const char kVoxelFragmentMain[] =
+    "void main() {\n"
+    "    vec4 t0 = texture(uTex0, vTc0);\n"
+    "    vec4 t1 = texture(uTex1, vTc1);\n"
+    "    vec4 t2 = texture(uTex2, vTc2);\n"
+    "    vec4 prev = vColor;\n"
+    "    for (int i = 0; i < uStages; ++i) {\n"
+    "        vec4 cst = uConst[i];\n"
+    "        vec3 a = operandRgb(uOp[i].x, source(uSrc[i].x, prev, t0, t1, t2, cst));\n"
+    "        vec3 b = operandRgb(uOp[i].y, source(uSrc[i].y, prev, t0, t1, t2, cst));\n"
+    "        vec3 c = operandRgb(uOp[i].z, source(uSrc[i].z, prev, t0, t1, t2, cst));\n"
+    "        float aa = operandA(uOpA[i].x, source(uSrcA[i].x, prev, t0, t1, t2, cst));\n"
+    "        float ab = operandA(uOpA[i].y, source(uSrcA[i].y, prev, t0, t1, t2, cst));\n"
+    "        float ac = operandA(uOpA[i].z, source(uSrcA[i].z, prev, t0, t1, t2, cst));\n"
+    "        vec3 rgb = clamp(combine(uSrc[i].w, a, b, c) * float(uOp[i].w), 0.0, 1.0);\n"
+    "        float alpha = clamp(combineA(uSrcA[i].w, aa, ab, ac) * float(uOpA[i].w), 0.0, 1.0);\n"
+    "        if (uSrc[i].w == 7) alpha = rgb.r;\n"
+    "        prev = vec4(rgb, alpha);\n"
+    "    }\n"
+    "    if (uAlphaFunc != 1) {\n"
+    "        float ref = uAlphaRef;\n"
+    "        float al = floor(prev.a * 255.0 + 0.5) / 255.0;\n"
+    "        bool pass = uAlphaFunc == 0 ? false\n"
+    "                  : uAlphaFunc == 2 ? al == ref\n"
+    "                  : uAlphaFunc == 3 ? al != ref\n"
+    "                  : uAlphaFunc == 4 ? al < ref\n"
+    "                  : uAlphaFunc == 5 ? al <= ref\n"
+    "                  : uAlphaFunc == 6 ? al > ref : al >= ref;\n"
+    "        if (!pass) discard;\n"
+    "    }\n"
+    "    fragColor = prev;\n"
+    "}\n";
+
+/* The fragment stage shares the compositor's texture environment functions: they are cut out of its
+ * source (from operandRgb to main) and put between the voxel program's own head and main. */
+static bool BuildVoxelProgram(void)
+{
+    const char *functions = strstr(kFragmentShader, "vec3 operandRgb("), *mainStart = strstr(kFragmentShader, "void main()");
+    char *fragment;
+    GLuint vs, fs;
+    GLint ok = 0;
+
+    if (functions == NULL || mainStart == NULL || mainStart < functions)
+        return false;
+    fragment = malloc(sizeof(kVoxelFragmentHead) + (size_t)(mainStart - functions) + sizeof(kVoxelFragmentMain));
+    if (fragment == NULL)
+        return false;
+    strcpy(fragment, kVoxelFragmentHead);
+    strncat(fragment, functions, (size_t)(mainStart - functions));
+    strcat(fragment, kVoxelFragmentMain);
+    vs = Compile(GL_VERTEX_SHADER, kVoxelVertexShader);
+    fs = Compile(GL_FRAGMENT_SHADER, fragment);
+    free(fragment);
+    if (vs == 0 || fs == 0)
+        return false;
+    G.voxProgram = glCreateProgram();
+    glAttachShader(G.voxProgram, vs);
+    glAttachShader(G.voxProgram, fs);
+    glLinkProgram(G.voxProgram);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    glGetProgramiv(G.voxProgram, GL_LINK_STATUS, &ok);
+    if (!ok)
+    {
+        char log[1024];
+
+        glGetProgramInfoLog(G.voxProgram, sizeof(log), NULL, log);
+        CtrLog_Write(CTR_LOG_ERROR, "c3d: voxel program link failed: %s", log);
+        glDeleteProgram(G.voxProgram);
+        G.voxProgram = 0;
+        return false;
+    }
+    G.voxReg = glGetUniformLocation(G.voxProgram, "uReg");
+    G.voxDepth = glGetUniformLocation(G.voxProgram, "uDepth");
+    G.voxTex[0] = glGetUniformLocation(G.voxProgram, "uTex0");
+    G.voxTex[1] = glGetUniformLocation(G.voxProgram, "uTex1");
+    G.voxTex[2] = glGetUniformLocation(G.voxProgram, "uTex2");
+    G.voxStages = glGetUniformLocation(G.voxProgram, "uStages");
+    G.voxSrc = glGetUniformLocation(G.voxProgram, "uSrc");
+    G.voxSrcA = glGetUniformLocation(G.voxProgram, "uSrcA");
+    G.voxOp = glGetUniformLocation(G.voxProgram, "uOp");
+    G.voxOpA = glGetUniformLocation(G.voxProgram, "uOpA");
+    G.voxConst = glGetUniformLocation(G.voxProgram, "uConst");
+    G.voxAlphaFunc = glGetUniformLocation(G.voxProgram, "uAlphaFunc");
+    G.voxAlphaRef = glGetUniformLocation(G.voxProgram, "uAlphaRef");
+    glGenVertexArrays(1, &G.voxVao);
+    glGenBuffers(1, &G.voxStream);
+    G.depthScale = -1.0f;
+    G.depthOffset = 0.0f;
+    CtrLog_Write(CTR_LOG_VIDEO, "c3d: voxel program ready");
+    return true;
+}
+
+/* The shader binary is not read: one vertex shader, with its uniforms' register numbers. */
+static DVLE_s sDvle;
+static DVLB_s sDvlb = { 1, &sDvle };
+static int sShaderInstance;
+
+DVLB_s *DVLB_ParseFile(const void *shbin, u32 size)
+{
+    (void)shbin;
+    (void)size;
+    return &sDvlb;
+}
+
+void DVLB_Free(DVLB_s *dvlb) { (void)dvlb; }
+void shaderProgramInit(shaderProgram_s *program) { program->vertexShader = NULL; }
+
+Result shaderProgramSetVsh(shaderProgram_s *program, DVLE_s *vsh)
+{
+    (void)vsh;
+    program->vertexShader = &sShaderInstance;
+    return 0;
+}
+
+Result shaderProgramFree(shaderProgram_s *program)
+{
+    program->vertexShader = NULL;
+    return 0;
+}
+
+int shaderInstanceGetUniformLocation(void *instance, const char *name)
+{
+    static const struct { const char *name; int reg; } registers[] = {
+        { "projection", 0 }, { "modelView", 4 }, { "shadeTint", 8 }, { "tintDiff", 9 },
+        { "grade", 10 }, { "fog", 11 }, { "dappleU", 12 }, { "dappleV", 13 },
+    };
+
+    (void)instance;
+    for (unsigned i = 0; i < sizeof(registers) / sizeof(registers[0]); ++i)
+        if (strcmp(registers[i].name, name) == 0)
+            return registers[i].reg;
+    return -1;
+}
+
+void C3D_BindProgram(shaderProgram_s *program) { G.voxelBound = program != NULL && program->vertexShader != NULL && G.voxProgram != 0; }
+
+void C3D_FVUnifSet(GPU_SHADER_TYPE type, int id, float x, float y, float z, float w)
+{
+    (void)type;
+    if (id < 0 || id >= 32)
+        return;
+    G.regs[id][0] = x;
+    G.regs[id][1] = y;
+    G.regs[id][2] = z;
+    G.regs[id][3] = w;
+}
+
+void C3D_FVUnifMtx4x4(GPU_SHADER_TYPE type, int id, const C3D_Mtx *mtx)
+{
+    for (int i = 0; i < 4; ++i)
+        C3D_FVUnifSet(type, id + i, mtx->r[i].x, mtx->r[i].y, mtx->r[i].z, mtx->r[i].w);
+}
+
+void C3D_DepthMap(bool bIsZBuffer, float zScale, float zOffset)
+{
+    (void)bIsZBuffer;
+    G.depthScale = zScale;
+    G.depthOffset = zOffset;
+}
+
+void C3D_ColorLogicOp(GPU_LOGICOP op) { (void)op; }
+
+/* ── Memory: blocks standing for VRAM, and which texture or block an address is in ── */
+
+typedef struct
+{
+    u8 *base;
+    size_t size;
+    GLuint vbo;       /* the GL copy, made when a draw first reads from the block */
+    size_t lo, hi;    /* bytes written since the copy was last made current */
+} VramBlock;
+
+static VramBlock sBlocks[8];
+
+void *vramAlloc(size_t size)
+{
+    void *memory = NULL;
+
+    if (size == 0 || posix_memalign(&memory, 256, size) != 0)
+        return NULL;
+    memset(memory, 0, size);
+    for (unsigned i = 0; i < sizeof(sBlocks) / sizeof(sBlocks[0]); ++i)
+        if (sBlocks[i].base == NULL)
+        {
+            sBlocks[i].base = memory;
+            sBlocks[i].size = size;
+            sBlocks[i].vbo = 0;
+            sBlocks[i].lo = size;
+            sBlocks[i].hi = 0;
+            return memory;
+        }
+    free(memory);
+    return NULL;
+}
+
+void vramFree(void *memory)
+{
+    for (unsigned i = 0; i < sizeof(sBlocks) / sizeof(sBlocks[0]); ++i)
+        if (sBlocks[i].base == memory && memory != NULL)
+        {
+            if (sBlocks[i].vbo != 0)
+            {
+                GLuint name = sBlocks[i].vbo;
+
+                glDeleteBuffers(1, &name);
+            }
+            memset(&sBlocks[i], 0, sizeof(sBlocks[i]));
+        }
+    free(memory);
+}
+
+static VramBlock *BlockOf(const void *address)
+{
+    const u8 *p = address;
+
+    for (unsigned i = 0; i < sizeof(sBlocks) / sizeof(sBlocks[0]); ++i)
+        if (sBlocks[i].base != NULL && p >= sBlocks[i].base && p < sBlocks[i].base + sBlocks[i].size)
+            return &sBlocks[i];
+    return NULL;
+}
+
+/* Bytes of a block were written: the GL copy, if there is one, takes them before its next draw. */
+static void BlockWritten(const void *address, size_t size)
+{
+    VramBlock *block = BlockOf(address);
+    size_t offset;
+
+    if (block == NULL || block->vbo == 0)
+        return;
+    offset = (size_t)((const u8 *)address - block->base);
+    if (offset + size > block->size)
+        size = block->size - offset;
+    if (offset < block->lo)
+        block->lo = offset;
+    if (offset + size > block->hi)
+        block->hi = offset + size;
+}
+
+static void BlockCurrent(VramBlock *block)
+{
+    if (block->vbo == 0)
+    {
+        glGenBuffers(1, &block->vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, block->vbo);
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)block->size, block->base, GL_DYNAMIC_DRAW);
+        block->lo = block->size;
+        block->hi = 0;
+        return;
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, block->vbo);
+    if (block->hi > block->lo)
+    {
+        glBufferSubData(GL_ARRAY_BUFFER, (GLintptr)block->lo, (GLsizeiptr)(block->hi - block->lo), block->base + block->lo);
+        block->lo = block->size;
+        block->hi = 0;
+    }
+}
+
+/* A texture over memory the voxel world carved out itself (a piece of its page arena) has no GL texture
+ * until it is first drawn from, and loses its handle each time the world sets it up again: the GL
+ * textures are kept per C3D_Tex and reused while the size and format stay. */
+typedef struct
+{
+    C3D_Tex *tex;
+    GLuint name;
+    u16 width, height;
+    GPU_TEXCOLOR fmt;
+    u8 *dirty;
+} LazyTexture;
+
+static LazyTexture sLazy[96];
+
+static bool TexLazyCreate(C3D_Tex *tex)
+{
+    LazyTexture *entry = NULL;
+    TexFormat f = FormatOf(tex->fmt);
+    size_t tiles = (size_t)(tex->width / 8) * (tex->height / 8), bytes = (tiles + 7) / 8;
+    bool registered = false;
+
+    if (tex->data == NULL || tex->width == 0 || tex->height == 0 || (tex->width & 7) != 0 || (tex->height & 7) != 0)
+        return false;
+    for (unsigned i = 0; i < sizeof(sLazy) / sizeof(sLazy[0]); ++i)
+        if (sLazy[i].tex == tex)
+            entry = &sLazy[i];
+    for (unsigned i = 0; entry == NULL && i < sizeof(sLazy) / sizeof(sLazy[0]); ++i)
+        if (sLazy[i].tex == NULL)
+        {
+            entry = &sLazy[i];
+            entry->tex = tex;
+        }
+    if (entry == NULL)
+        return false;
+    if (entry->name != 0 && (entry->width != tex->width || entry->height != tex->height || entry->fmt != tex->fmt))
+    {
+        GLuint old = entry->name;
+
+        glDeleteTextures(1, &old);
+        free(entry->dirty);
+        entry->name = 0;
+        entry->dirty = NULL;
+        FreeShadow(tex);
+    }
+    if (entry->name == 0)
+    {
+        GLuint name = 0;
+
+        entry->dirty = calloc(1, bytes);
+        if (entry->dirty == NULL)
+            return false;
+        glGenTextures(1, &name);
+        glBindTexture(GL_TEXTURE_2D, name);
+        glTexStorage2D(GL_TEXTURE_2D, 1, f.internal, tex->width, tex->height);
+        entry->name = name;
+        entry->width = tex->width;
+        entry->height = tex->height;
+        entry->fmt = tex->fmt;
+        FreeShadow(tex);
+        CtrLog_Write(CTR_LOG_VIDEO, "c3d: page texture gl=%u %ux%u fmt=%d", name, tex->width, tex->height, (int)tex->fmt);
+    }
+    for (int i = 0; i < REGISTRY; ++i)
+        registered |= sTextures[i] == tex;
+    if (!registered)
+        Register((void **)sTextures, tex);
+    tex->glTexture = entry->name;
+    tex->lazy = true;
+    tex->dirtyTiles = entry->dirty;
+    memset(entry->dirty, 0xFF, bytes);
+    tex->touched = true;
+    TexApplyParams(tex);
+    return true;
+}
+
+/* The texture a draw samples from one of its units, made and brought up to date as needed. */
+static GLuint TexReady(C3D_Tex *tex)
+{
+    if (tex == NULL || tex->data == NULL || (tex->data == &sGpuMarker && tex->glTexture == 0))
+        return G.white;
+    if (tex->glTexture == 0 && !TexLazyCreate(tex))
+        return G.white;
+    /* A texture the CPU writes without saying so (the sprite atlas, the atlases of tiles) is compared
+     * with what the GL holds once a frame, where it is first drawn from; the others say what changed. */
+    if (!tex->lazy && tex->dirtyTiles != NULL && tex->scanned != G.frameNo)
+    {
+        tex->scanned = G.frameNo;
+        TexUpload(tex, true);
+    }
+    else if (tex->touched)
+        TexUpload(tex, false);
+    return tex->glTexture;
+}
+
+/* Bytes of CPU memory were written (a copy into a texture's piece of the arena, or a cache flush that on
+ * the console made the GPU see them): the tiles they cover are uploaded before the texture is drawn from. */
+static void MemoryWritten(const void *address, size_t size)
+{
+    const u8 *p = address;
+
+    if (size == 0)
+        return;
+    BlockWritten(address, size);
+    for (int i = 0; i < REGISTRY; ++i)
+    {
+        C3D_Tex *tex = sTextures[i];
+        const u8 *base;
+        size_t tileBytes, first, last, tiles, lead = 0, from = 0;
+
+        if (tex == NULL || tex->data == NULL || tex->data == &sGpuMarker || tex->dirtyTiles == NULL || tex->size == 0)
+            continue;
+        base = tex->data;
+        if (p + size <= base || p >= base + tex->size)
+            continue;
+        tileBytes = 64 * FormatOf(tex->fmt).memory;
+        tiles = (size_t)(tex->width / 8) * (tex->height / 8);
+        if (p > base)
+            from = (size_t)(p - base);
+        else
+            lead = (size_t)(base - p);
+        first = from / tileBytes;
+        last = (from + (size - lead) - 1) / tileBytes;
+        if (last >= tiles)
+            last = tiles - 1;
+        for (size_t tile = first; tile <= last; ++tile)
+            tex->dirtyTiles[tile >> 3] |= (u8)(1u << (tile & 7));
+        tex->touched = true;
+    }
+}
+
+void GSPGPU_FlushDataCache(const void *address, u32 size) { MemoryWritten(address, size); }
+
+void C3D_SyncTextureCopy(const u32 *inadr, u32 indim, u32 *outadr, u32 outdim, u32 size, u32 flags)
+{
+    (void)indim;
+    (void)outdim;
+    (void)flags;
+    memcpy(outadr, inadr, size);
+    MemoryWritten(outadr, size);
+}
+
+/* ── Drawing ─────────────────────────────────────────────────────────────── */
+
+static void ApplyVoxelState(void)
+{
+    ApplyTarget();
+    glUseProgram(G.voxProgram);
+    for (int unit = 0; unit < 3; ++unit)
+    {
+        glActiveTexture(GL_TEXTURE0 + (GLenum)unit);
+        glBindTexture(GL_TEXTURE_2D, TexReady(CONTEXT_UNITS[unit]));
+        glUniform1i(G.voxTex[unit], unit);
+    }
+    glActiveTexture(GL_TEXTURE0);
+    glUniform4fv(G.voxReg, 14, &G.regs[0][0]);
+    glUniform2f(G.voxDepth, G.depthScale, G.depthOffset);
+    FillEnv(G.voxSrc, G.voxSrcA, G.voxOp, G.voxOpA, G.voxConst, G.voxStages, true);
+    glUniform1i(G.voxAlphaFunc, G.alphaTest ? (int)G.alphaFunc : (int)GPU_ALWAYS);
+    glUniform1f(G.voxAlphaRef, (float)G.alphaRef / 255.0f);
+    ApplyPipeline();
+}
+
+void C3D_DrawArrays(GPU_Primitive_t primitive, int first, int size)
+{
+    static const GLenum glFormats[4] = { GL_BYTE, GL_UNSIGNED_BYTE, GL_SHORT, GL_FLOAT };
+    static const unsigned sizes[4] = { 1, 1, 2, 4 };
+    const u8 *data = G.bufInfo.data;
+    unsigned stride = G.bufInfo.stride, offset = 0;
+    VramBlock *block;
+
+    FlushBatch();
+    if (G.skip || G.target == NULL || size <= 0 || data == NULL || stride == 0 || primitive != GPU_TRIANGLES || !G.voxelBound)
+        return;
+    ApplyVoxelState();
+    glBindVertexArray(G.voxVao);
+    block = BlockOf(data);
+    if (block != NULL)
+    {
+        BlockCurrent(block);
+        offset = (unsigned)(data - block->base);
+    }
+    else
+    {
+        glBindBuffer(GL_ARRAY_BUFFER, G.voxStream);
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)((size_t)size * stride), data + (size_t)first * stride, GL_STREAM_DRAW);
+    }
+    glDisableVertexAttribArray(0);
+    glDisableVertexAttribArray(1);
+    for (unsigned i = 0; i < G.attrInfo.loaders; ++i)
+    {
+        unsigned index = G.attrInfo.loader[i].index, format = G.attrInfo.loader[i].format, components = G.attrInfo.loader[i].count;
+
+        if (index <= 1)
+        {
+            glEnableVertexAttribArray(index);
+            glVertexAttribPointer(index, (GLint)components, glFormats[format], GL_FALSE, (GLsizei)stride, (void *)(uintptr_t)offset);
+        }
+        offset += components * sizes[format];
+    }
+    glDrawArrays(GL_TRIANGLES, block != NULL ? first : 0, size);
+    CheckError("voxel draw");
+    CountDraw(G.target, true, (unsigned)size / 6);
+    glBindVertexArray(G.vao);
+    glBindBuffer(GL_ARRAY_BUFFER, G.rawVbo);
 }

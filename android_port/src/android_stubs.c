@@ -9,6 +9,10 @@
 
 void CtrGpuMem_Report(const char *why) { (void)why; }
 
+/* Nothing is ever borrowed back into "VRAM" (the voxel world's atlas pages stay where they are). */
+uint32_t CtrGpuMem_LargestVram(void) { return 0; }
+
+#if !CTR_VOXEL_ENABLED
 const CtrVoxelStats *CtrVoxel_GetStats(void)
 {
     static const CtrVoxelStats none;
@@ -22,6 +26,7 @@ void CtrVoxel_ArenaUse(uint32_t *chunkUsed, uint32_t *chunkLargest, uint32_t *pa
 {
     *chunkUsed = *chunkLargest = *pageUsed = *pageLargest = 0;
 }
+#endif
 
 /*
  * The Mystery Gift screens (src/mystery_gift_menu.c is a GBA-only program the build leaves

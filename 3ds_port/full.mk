@@ -369,9 +369,11 @@ build/ctr_voxel.o: src/voxel/ctr_voxel.c Makefile full.mk
 	@mkdir -p $(dir $@)
 	"$(CC)" $(CPPFLAGS) $(CFLAGS) -Isrc/voxel -MMD -MP -c $< -o $@
 
+ifndef PORT_NO_PICASSO
 romfs/shaders/voxel.shbin: src/voxel/voxel.v.pica
 	@mkdir -p $(dir $@)
 	$(DEVKITPRO)/tools/bin/picasso -o $@ $<
+endif
 
 build/maps.s build/map_layouts.inc $(ROMFS_MAP_OUT) &: $(SCRIPTS)/gen_map_data.py \
 		$(ROOT)/data/maps.s $(ROOT)/data/layouts/layouts.inc

@@ -330,6 +330,24 @@ static bool GpuFinishEarly(void)
 
 #endif /* PLATFORM_ANDROID */
 
+#ifdef PLATFORM_ANDROID
+/* No GX queue to budget the world's copies against: a frame takes this many (a copy is a memcpy
+ * and a deferred upload of what changed, drawn from the same frame). */
+#define ANDROID_UPLOAD_COPIES 48u
+
+bool CtrVideo_TryVoxelUpload(void)
+{
+    if (sUploadCommands + 2u > ANDROID_UPLOAD_COPIES * 2u)
+        return false;
+    sUploadCommands += 2u;
+    return true;
+}
+
+unsigned CtrVideo_VoxelUploadsLeft(void)
+{
+    return sUploadCommands < ANDROID_UPLOAD_COPIES * 2u ? (ANDROID_UPLOAD_COPIES * 2u - sUploadCommands) / 2u : 0;
+}
+#else
 bool CtrVideo_TryVoxelUpload(void)
 {
     if (sFrameQueue == NULL)
@@ -357,6 +375,7 @@ unsigned CtrVideo_VoxelUploadsLeft(void)
     room = capacity > used + sRenderReserve ? capacity - used - sRenderReserve : 0;
     return room / 2u;
 }
+#endif
 
 /* The voxel overworld replaces this compositor's output while the player is
  * walking around; every other game state keeps the 2D path below. */
