@@ -49,6 +49,7 @@ ENGINE_PATTERNS = [
     "engine/*",
     "assets/asset_index.bin",
     "assets/asset_ptr_index.bin",
+    "assets/asset_base.bin",
     "assets/asset_map.txt",
     "assets/asset_ptr_map.txt",
     "scripts/*.rel",

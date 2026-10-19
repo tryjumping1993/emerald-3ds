@@ -57,19 +57,34 @@ def global_symbols(elf: Path) -> dict[str, int]:
     return result
 
 
+def absolute_symbols(elf: Path) -> set[str]:
+    """Names of the symbols that are plain numbers (NULL, TRUE, flag constants the assembler
+    .set): a word that holds one is a value, not an address, and is never rebased. lld keeps
+    the relocations against them that GNU ld drops."""
+    out = subprocess.check_output([tool("arm-none-eabi-readelf"), "--symbols", "--wide", str(elf)],
+                                  text=True, errors="ignore")
+    names = set()
+    for line in out.splitlines():
+        fields = line.split()
+        if len(fields) >= 8 and fields[6] == "ABS":
+            names.add(fields[7])
+    return names
+
+
 def relocations(elf: Path, section: str) -> list[tuple[int, str]]:
     out = subprocess.check_output([tool("arm-none-eabi-readelf"), "-r", "-W", str(elf)],
                                   text=True, errors="ignore")
+    absolute = absolute_symbols(elf)
     found = []
     inside = False
     for line in out.splitlines():
         if line.startswith("Relocation section"):
-            inside = ("'.rel%s'" % section) in line
+            inside = ("'.rel%s'" % section) in line or ("'.rel.%s'" % section.lstrip(".")) in line
             continue
         if not inside:
             continue
-        m = re.match(r"^([0-9a-f]{8})\s+[0-9a-f]+\s+(R_ARM_\w+)", line)
-        if m:
+        m = re.match(r"^([0-9a-f]{8})\s+[0-9a-f]+\s+(R_ARM_\w+)(?:\s+[0-9a-f]{8}\s+(\S+))?", line)
+        if m and m.group(3) not in absolute:
             found.append((int(m.group(1), 16), m.group(2)))
     return found
 

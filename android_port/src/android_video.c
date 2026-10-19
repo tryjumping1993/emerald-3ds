@@ -77,6 +77,25 @@ void CtrVideo_Present(void)
         return;
     }
     DrawFrame(sFrame);
+    if (sStats.frames % 120 == 0)
+    {
+        unsigned lit = 0;
+
+        for (int i = 0; i < CTR_GAME_WIDTH * CTR_GAME_HEIGHT; ++i)
+            lit += sFrame[i] != 0;
+        unsigned vram = 0, palette = 0, objects = 0;
+
+        for (unsigned i = 0; sMemory.vram != NULL && i < 0x18000; ++i)
+            vram += sMemory.vram[i] != 0;
+        for (unsigned i = 0; sMemory.palette != NULL && i < 512; ++i)
+            palette += sMemory.palette[i] != 0;
+        for (unsigned i = 0; sMemory.oam != NULL && i < 128; ++i)
+            objects += (sMemory.oam[i * 4] & 0x300) != 0x200;
+        CtrLog_Write(CTR_LOG_VIDEO, "frame %lu: DISPCNT %04x BG0CNT %04x backdrop %04x lit %u/%u vram %u plt %u obj %u",
+                     (unsigned long)sStats.frames, sMemory.regs != NULL ? sMemory.regs[0] : 0xFFFF,
+                     sMemory.regs != NULL ? sMemory.regs[4] : 0xFFFF, sMemory.palette != NULL ? sMemory.palette[0] : 0xFFFF,
+                     lit, CTR_GAME_WIDTH * CTR_GAME_HEIGHT, vram, palette, objects);
+    }
     if (GbaFrameOrigin(&originX, &originY))
     {
         /* The renderer drew the 240x160 picture at the top left: carry it to its place. */

@@ -67,13 +67,21 @@ def elf_symbols(elf: Path) -> dict[str, int]:
     out = subprocess.check_output([tool("arm-none-eabi-readelf"), "--wide", "--symbols", str(elf)],
                                   text=True, errors="ignore")
     result: dict[str, int] = {}
+    local: dict[str, set[int]] = {}
     for line in out.splitlines():
         parts = line.split()
-        if len(parts) < 8 or not parts[0].endswith(":"):
+        if len(parts) < 8 or not parts[0].endswith(":") or parts[6] == "UND":
             continue
-        if parts[4] not in {"GLOBAL", "WEAK"} or parts[6] == "UND":
-            continue
-        result[parts[7]] = int(parts[1], 16)
+        if parts[4] in {"GLOBAL", "WEAK"}:
+            result[parts[7]] = int(parts[1], 16)
+        elif parts[4] == "LOCAL" and parts[3] in {"FUNC", "OBJECT", "NOTYPE"} and parts[6] != "ABS":
+            local.setdefault(parts[7], set()).add(int(parts[1], 16))
+    # A shared library keeps only its entry points global (the rest is hidden by a version
+    # script, so that unused code can be dropped): the game's own symbols are local there,
+    # and a name that is one thing in the whole image names it as well as a global would.
+    for name, addresses in local.items():
+        if name not in result and len(addresses) == 1:
+            result[name] = next(iter(addresses))
     return result
 
 

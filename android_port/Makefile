@@ -24,7 +24,7 @@ export CTR_CLANG := $(CC)
 ROOT := ..
 ANDROID_ROOT := $(abspath ../android_port)
 
-ARCH := --target=armv7a-linux-androideabi$(API) -mfpu=neon -mfloat-abi=softfp -marm -fPIC
+ARCH := --target=armv7a-linux-androideabi$(API) -mfpu=neon -mfloat-abi=softfp -marm -fPIC -funwind-tables -fno-omit-frame-pointer
 # The game's own data assembly: GNU as needs the symbols the macros test.
 export CTR_AS := $(MSYS_BIN)/arm-none-eabi-as.exe
 export CTR_OBJCOPY := $(MSYS_BIN)/arm-none-eabi-objcopy.exe
@@ -142,7 +142,8 @@ build/emerald3ds_release.ld: $(ANDROID_ROOT)/emerald3ds_android.ld.in
 
 # Both links see the same objects: the image keeps .gamedata's contents so the bundle
 # generators can read them; the shipped library reserves it.
-SO_LINK = "$(CC)" $(ARCH) -shared -fuse-ld=lld -Wl,--gc-sections -Wl,--emit-relocs -Wl,-z,max-page-size=4096 	$(LDFLAGS) -Wl,-T,build/emerald3ds_$(1).ld -Wl,-Map,build/$(2).map @build/link.rsp $(SO_LIBS) -o $(3)
+SO_LINK = "$(CC)" $(ARCH) -shared -fuse-ld=lld -Wl,--gc-sections -Wl,--emit-relocs -Wl,-z,max-page-size=4096 \
+	-Wl,--version-script,$(ANDROID_ROOT)/exports.map $(LDFLAGS) -Wl,-T,build/emerald3ds_$(1).ld -Wl,-Map,build/$(2).map @build/link.rsp $(SO_LIBS) -o $(3)
 
 # The ELF names are the 3DS build's, so that full.mk's rules for the asset table, the
 # script, song and game data bundles (which read them) apply as they are; the shipped
