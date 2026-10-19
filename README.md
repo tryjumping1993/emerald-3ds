@@ -245,6 +245,7 @@ the development loop, loose data, data packs and host tests.
 | [French build](docs/FRENCH.md) | Playing in French with your own Pokémon Émeraude (France) ROM. |
 | [Italian build](docs/ITALIAN.md) | Playing in Italian with your own Pokémon Versione Smeraldo (Italy) ROM. |
 | [Architecture](docs/ARCHITECTURE.md) | How the engine and the 3DS backend fit together. |
+| [AYN Thor port plan](docs/THOR_PORT_PLAN.md) | Plan for a native Android port to the AYN Thor dual-screen handheld: decisions, module-by-module conversion, phases. |
 | [Asset pipeline](docs/ASSET_PIPELINE.md) | How game data is prepared for the port. |
 | [Releasing](docs/RELEASING.md) | Building and packaging a release. |
 | [Contributing](CONTRIBUTING.md) | Guidelines for contributing to the project. |
