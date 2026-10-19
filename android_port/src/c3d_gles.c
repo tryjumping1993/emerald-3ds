@@ -370,6 +370,20 @@ static GLenum WrapOf(u8 wrap)
 
 /* ── Setup ───────────────────────────────────────────────────────────────── */
 
+/* Citro2D owns stage 0 until the compositor re-initialises it: drawn with, it is the sprite's
+ * (texture mixed with a tint) or the solid's, and raw draws that leave it alone get the same. */
+#define ENV_C2D 100
+
+static void SetC2dEnv(void)
+{
+    G.env[0].srcRgb = G.env[0].srcAlpha = GPU_PREVIOUS;
+    G.env[0].opRgb = G.env[0].opAlpha = 0;
+    G.env[0].funcRgb = ENV_C2D;
+    G.env[0].funcAlpha = GPU_REPLACE;
+    G.env[0].color = 0xFFFFFFFFu;
+    G.env[0].scaleRgb = G.env[0].scaleAlpha = GPU_TEVSCALE_1;
+}
+
 static void TexEnvDefault(C3D_TexEnv *env)
 {
     env->srcRgb = env->srcAlpha = GPU_PREVIOUS;
@@ -415,6 +429,7 @@ bool C3D_Init(size_t cmdBufSize)
     }
     for (int i = 0; i < 6; ++i)
         TexEnvDefault(&G.env[i]);
+    SetC2dEnv();
     Mtx_Identity(&G.view);
     G.blend = true;
     G.colorEq = G.alphaEq = GPU_BLEND_ADD;
@@ -1100,7 +1115,7 @@ static void UploadEnv(void)
         constants[i * 4 + 1] = (float)((e->color >> 8) & 255) / 255.0f;
         constants[i * 4 + 2] = (float)((e->color >> 16) & 255) / 255.0f;
         constants[i * 4 + 3] = (float)((e->color >> 24) & 255) / 255.0f;
-        if (!TexEnvIsDefault(e) || (i == 0 && G.mode == MODE_RAW))
+        if (i != 0 ? !TexEnvIsDefault(e) : (G.mode == MODE_RAW || e->funcRgb == ENV_C2D))
             stages = i + 1;
     }
     /* Stage 0 is Citro2D's for sprites and solids; later stages are the compositor's. */
@@ -1176,9 +1191,9 @@ static void TraceBatch(void)
     if (!sTrace || sTraceCount >= 150)
         return;
     ++sTraceCount;
-    CtrLog_Write(CTR_LOG_VIDEO, "TRACE %s tex=%u q=%u v0=(%.0f,%.0f uv %.3f,%.3f col %08x z%.2f blend %d%d%d%d scissor %d env0=%x/%x:%d stages=%d",
+    CtrLog_Write(CTR_LOG_VIDEO, "TRACE %s tex=%u q=%u v0=(%.0f,%.0f uv %.3f,%.3f col %08x tintblend %.2f z%.2f blend %d%d%d%d scissor %d env0=%x/%x:%d stages=%d",
                  G.mode == MODE_IMAGE ? "img" : G.mode == MODE_SOLID ? "solid" : "raw", G.batchTexture ? G.batchTexture->glTexture : 0,
-                 G.quads, v->x, v->y, v->u, v->v, v->color, v->z, G.srcColor, G.dstColor, G.srcAlpha, G.dstAlpha, (int)G.scissorMode,
+                 G.quads, v->x, v->y, v->u, v->v, v->color, v->blendTint, v->z, G.srcColor, G.dstColor, G.srcAlpha, G.dstAlpha, (int)G.scissorMode,
                  G.env[0].srcRgb, G.env[0].srcAlpha, G.env[0].funcRgb, (int)G.alphaTest);
 }
 
@@ -1222,6 +1237,11 @@ void C3D_FrameSplit(u8 flags)
 
 static void BeginDraw(DrawMode mode, C3D_Tex *tex)
 {
+    if (G.env[0].funcRgb != ENV_C2D)
+    {
+        FlushBatch();
+        SetC2dEnv();
+    }
     if (G.quads != 0 && (G.mode != mode || G.batchTexture != tex || G.quads >= MAX_QUADS))
         FlushBatch();
     G.mode = mode;
@@ -1478,6 +1498,7 @@ void C2D_TargetClear(C3D_RenderTarget *target, u32 color)
 void C2D_Prepare(void)
 {
     FlushBatch();
+    SetC2dEnv();
     G.depthTest = true;
     G.depthFunc = GPU_GEQUAL;
     G.writeMask = GPU_WRITE_ALL;
@@ -1684,7 +1705,7 @@ void C3D_DrawElements(GPU_Primitive_t primitive, int count, int type, const void
         if (index > maxIndex)
             maxIndex = index;
     }
-    G.mode = MODE_RAW;
+    G.mode = G.env[0].funcRgb == ENV_C2D ? MODE_IMAGE : MODE_RAW;
     G.batchTexture = G.bound;
     ApplyState();
     glBindVertexArray(G.vao);
