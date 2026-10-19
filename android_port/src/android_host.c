@@ -137,6 +137,7 @@ static EGLSurface s_idleSurface = EGL_NO_SURFACE; /* keeps the context current w
 static GLuint s_program;
 static SetFrameRateFn s_setFrameRate;
 static int s_refreshHint = 120;
+static bool s_forceSixty;
 static unsigned s_presentsPerTick = 1;
 static bool s_rebuilding;
 /* The bottom canvas is only presented when it changes, so the host keeps the last one to
@@ -235,7 +236,7 @@ static bool initEgl(void)
     }
     /* API 30+: lets the 120 Hz top panel run the 60 fps game at 60 Hz. Looked up at run time because
      * the app's minSdk is 29 (RTLD_DEFAULT does not see libandroid). Without it the top surface just
-     * follows the panel's refresh rate. TODO: swap every second vsync there if a 120 Hz mode is active. */
+     * follows the panel's refresh rate; noteSwap times it and the engine presents twice a tick on 120 Hz. */
     void *libandroid = dlopen("libandroid.so", RTLD_NOW);
     s_setFrameRate = libandroid != NULL ? (SetFrameRateFn)dlsym(libandroid, "ANativeWindow_setFrameRate") : NULL;
     if (!createContext())
@@ -396,7 +397,7 @@ static void attachSurface(int index)
     eglMakeCurrent(s_display, s->surface, s->surface, s_context);
     eglSwapInterval(s_display, index == SCREEN_TOP ? 1 : 0);
     if (index == SCREEN_TOP && s_setFrameRate != NULL)
-        s_setFrameRate(s->window, (float)s_refreshHint, 0 /* ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT */);
+        s_setFrameRate(s->window, s_forceSixty ? 60.f : (float)s_refreshHint, 0 /* ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT */);
     EGLint w = 0, h = 0;
     eglQuerySurface(s_display, s->surface, EGL_WIDTH, &w);
     eglQuerySurface(s_display, s->surface, EGL_HEIGHT, &h);
@@ -546,6 +547,8 @@ bool AndroidHost_TopBegin(int *width, int *height)
     return w > 0 && h > 0;
 }
 
+static void applyHint(void);
+
 /*
  * Each swap of the top surface waits for a vsync, so the time between two says the panel's period. The
  * least of the last few is taken for it (a late frame lengthens one, never shortens): under 11.5 ms the panel
@@ -575,20 +578,42 @@ static void noteSwap(void)
             LOGI("top swaps: mean %.2f ms, worst %.2f ms, %u over 12 ms, %u picture(s) per tick", sum / seen, worst, late, s_presentsPerTick);
             sum = worst = 0.0; seen = late = 0;
         }
-        intervals[count++ % WINDOW] = ms - last;
-        if (count >= WINDOW)
+        /* The first swaps fill the buffer queue and wait for nothing: no panel is faster than 5 ms. */
+        if (d >= 5.0)
+            intervals[count++ % WINDOW] = d;
+        if (count >= WINDOW && count % 12 == 0)
         {
-            double least = intervals[0];
-            unsigned wanted;
+            /* The median of the last swaps is the panel's period: a stall leaves a few quick ones behind it. */
+            double sorted[WINDOW], median;
+            unsigned wanted, class;
+            static unsigned agreed, lastClass;
 
+            memcpy(sorted, intervals, sizeof(sorted));
             for (unsigned i = 1; i < WINDOW; ++i)
-                if (intervals[i] < least)
-                    least = intervals[i];
-            wanted = least < 11.5 ? 2u : 1u;
-            if (wanted != s_presentsPerTick)
+                for (unsigned j = i; j > 0 && sorted[j - 1] > sorted[j]; --j)
+                {
+                    double t = sorted[j];
+
+                    sorted[j] = sorted[j - 1];
+                    sorted[j - 1] = t;
+                }
+            median = sorted[WINDOW / 2];
+            /* 120 Hz is two pictures a tick, 60 Hz one; any other rate (a 90 or 144 Hz panel is no multiple of the
+             * game's tick) is held to 60 by asking the system for it. Three readings in a row before it changes. */
+            class = median > 7.4 && median < 9.5 ? 2u : median > 15.0 && median < 18.5 ? 1u : 3u;
+            agreed = class == lastClass ? agreed + 1 : 1;
+            lastClass = class;
+            wanted = class == 2u ? 2u : 1u;
+            if (agreed >= 3 && wanted != s_presentsPerTick)
             {
                 s_presentsPerTick = wanted;
-                LOGI("top swaps every %.2f ms: %u picture(s) per tick", least, wanted);
+                LOGI("top swaps every %.2f ms: %u picture(s) per tick", median, wanted);
+            }
+            if (agreed >= 3 && class == 3u && !s_forceSixty)
+            {
+                s_forceSixty = true;
+                applyHint();
+                LOGI("a %.2f ms panel is no multiple of the game's tick: refresh asked at 60 Hz", median);
             }
         }
     }
@@ -598,18 +623,21 @@ static void noteSwap(void)
 unsigned AndroidHost_PresentsPerTick(void) { return s_presentsPerTick; }
 
 /* The refresh rate asked of the system for the top surface, now and for every surface made after. */
-void AndroidHost_SetRefreshHint(int hz)
+static void applyHint(void)
 {
     Screen *s = &s_screen[SCREEN_TOP];
 
+    if (s->window != NULL && s_setFrameRate != NULL)
+        s_setFrameRate(s->window, s_forceSixty ? 60.f : (float)s_refreshHint, 0);
+}
+
+void AndroidHost_SetRefreshHint(int hz)
+{
     hz = hz >= 100 ? 120 : 60;
     if (hz == s_refreshHint)
         return;
     s_refreshHint = hz;
-    if (s->window != NULL && s_setFrameRate != NULL)
-        s_setFrameRate(s->window, (float)hz, 0);
-    if (hz == 60)
-        s_presentsPerTick = 1;
+    applyHint();
 }
 
 void AndroidHost_TopEnd(void)

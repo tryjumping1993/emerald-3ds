@@ -2510,14 +2510,14 @@ void C3D_SyncTextureCopy(const u32 *inadr, u32 indim, u32 *outadr, u32 outdim, u
 
 /* ── Drawing ─────────────────────────────────────────────────────────────── */
 
-static void ApplyVoxelState(void)
+static bool ApplyVoxelState(void)
 {
     VoxVariant *variant = VoxFor();
     float constants[24];
 
     ApplyTarget();
     if (variant->program == 0)
-        return;
+        return false;
     glUseProgram(variant->program);
     for (int unit = 0; unit < 3; ++unit)
     {
@@ -2568,6 +2568,7 @@ static void ApplyVoxelState(void)
     }
     variant->applied = true;
     ApplyPipeline();
+    return true;
 }
 
 void C3D_DrawArrays(GPU_Primitive_t primitive, int first, int size)
@@ -2581,7 +2582,8 @@ void C3D_DrawArrays(GPU_Primitive_t primitive, int first, int size)
     FlushBatch();
     if (G.skip || G.target == NULL || size <= 0 || data == NULL || stride == 0 || primitive != GPU_TRIANGLES || !G.voxelBound)
         return;
-    ApplyVoxelState();
+    if (!ApplyVoxelState())
+        return;
     glBindVertexArray(G.voxVao);
     block = BlockOf(data);
     if (block != NULL)
@@ -3019,8 +3021,6 @@ static void ReplayFrameBegin(void)
 }
 
 /* After the frame's own present (3ds_platform.c): the pictures a faster panel shows for the same tick. */
-int CtrSettings_GetInt(const char *key, int fallback);
-
 void AndroidVideo_PresentExtra(void)
 {
     static unsigned ticks;

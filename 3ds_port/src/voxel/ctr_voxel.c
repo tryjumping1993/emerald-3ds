@@ -161,7 +161,11 @@ typedef struct
 /* One atlas per tileset pair, shared by every map that uses that pair. Six:
  * walking back and forth through a string of towns and routes reaches five
  * or six pairs, and with four they evicted each other on every crossing. */
+#ifdef PLATFORM_ANDROID
+#define VOXEL_ATLAS_SLOTS 10u   /* the Thor's memory is no 6 MiB of VRAM */
+#else
 #define VOXEL_ATLAS_SLOTS 6u
+#endif
 
 typedef struct
 {
@@ -626,7 +630,11 @@ static void PackRange(VoxelVertex *vertices, unsigned first, unsigned count, Pac
  * atlas could be placed in. 96K vertices: Rustboro's view alone draws 54K, and
  * the prefetch ring around it has to fit as well.
  */
+#ifdef PLATFORM_ANDROID
+#define VOXEL_CHUNK_VRAM_BUDGET (6144u * 1024u)
+#else
 #define VOXEL_CHUNK_VRAM_BUDGET (1536u * 1024u)
+#endif
 
 typedef struct
 {
@@ -1061,7 +1069,11 @@ static int sDynamicX, sDynamicZ; /* the billboards' origin this frame */
 #define VOXEL_PAGE_SLICE (64u * 1024u) /* texels per read: 128 KiB */
 /* Pages take their whole power-of-two texture (PageBytes): the Battle
  * Frontier's two halves, in view together, are 512 KiB each. */
+#ifdef PLATFORM_ANDROID
+#define VOXEL_PAGE_VRAM_BUDGET (4096u * 1024u)
+#else
 #define VOXEL_PAGE_VRAM_BUDGET (1024u * 1024u)
+#endif
 /* Atlas pages that may borrow a gap of the pages' arena (AtlasPageBorrow). */
 #define VOXEL_ATLAS_BORROW_MAX 2u
 /* The arena's pieces: a page's texture and its window mask, and the
