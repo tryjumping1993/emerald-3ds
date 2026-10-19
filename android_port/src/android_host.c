@@ -583,7 +583,8 @@ static void noteSwap(void)
             intervals[count++ % WINDOW] = d;
         if (count >= WINDOW && count % 12 == 0)
         {
-            /* The median of the last swaps is the panel's period: a stall leaves a few quick ones behind it. */
+            /* The lower quartile of the last swaps is the panel's period: a swap that waited for nothing but the vsync is
+             * as quick as the panel allows, and a stall (a map loading) only adds slow ones, never fast. */
             double sorted[WINDOW], median;
             unsigned wanted, class;
             static unsigned agreed, lastClass;
@@ -597,7 +598,7 @@ static void noteSwap(void)
                     sorted[j] = sorted[j - 1];
                     sorted[j - 1] = t;
                 }
-            median = sorted[WINDOW / 2];
+            median = sorted[WINDOW / 4];
             /* 120 Hz is two pictures a tick, 60 Hz one; any other rate (a 90 or 144 Hz panel is no multiple of the
              * game's tick) is held to 60 by asking the system for it. Three readings in a row before it changes. */
             class = median > 7.4 && median < 9.5 ? 2u : median > 15.0 && median < 18.5 ? 1u : 3u;
