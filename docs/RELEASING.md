@@ -33,6 +33,8 @@ must be at most 99 and patch versions at most 999. Prereleases sort below
 their final release; successive prereleases of the same version share a code.
 Use a new patch version for published upgrades. A manual **Run workflow**
 builds a signed verification artifact without creating a release.
+Manual verification runs reuse local build outputs for faster diagnostics;
+tagged releases always start with a clean checkout.
 
 The runner needs the Android SDK/NDK, JDK, MSYS2 UCRT64 tools, Python/Pillow,
 Git, GitHub CLI, and the maintainer-local signing configuration described in

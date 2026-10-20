@@ -1,0 +1,9 @@
+/* The library's whole interface: what the Java shell calls. Everything else is local, so
+ * that --gc-sections drops the game's GBA-only units the way the 3DS link does. */
+{
+	global:
+		JNI_OnLoad;
+		Java_com_emerald3ds_thor_NativeBridge_*;
+	local:
+		*;
+};

@@ -16,6 +16,7 @@ builder/payload/
 *.smdh
 *.elf
 *.map
+!android_port/exports.map
 *.o
 *.d
 *.exe
