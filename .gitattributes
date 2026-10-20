@@ -1,0 +1,4 @@
+# Patches must match the LF upstream sources; bash scripts must run on Windows too.
+*.patch text eol=lf
+*.sh text eol=lf
+gradlew text eol=lf

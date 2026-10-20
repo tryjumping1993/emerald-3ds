@@ -105,9 +105,6 @@ jobs:
 
   build-thor:
     runs-on: windows-latest
-    env:
-      ANDROID_HOME: ${{ runner.temp }}/thor-android-sdk
-      ANDROID_SDK_ROOT: ${{ runner.temp }}/thor-android-sdk
     steps:
       - name: Keep shell scripts in LF format
         run: git config --global core.autocrlf false
@@ -119,6 +116,12 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      - name: Use an Android SDK path without spaces
+        shell: pwsh
+        run: |
+          $sdk = Join-Path $env:RUNNER_TEMP 'thor-android-sdk'
+          "ANDROID_HOME=$sdk" >> $env:GITHUB_ENV
+          "ANDROID_SDK_ROOT=$sdk" >> $env:GITHUB_ENV
       - uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools'
