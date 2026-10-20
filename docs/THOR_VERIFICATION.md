@@ -1,5 +1,25 @@
 # Thor verification
 
+## On-device ROM builder — 2026-10-20
+
+No Thor was connected. Android runtime tests use an API 36 x86-64 emulator
+with the APK's Python 3.11/Pillow 9.2 builder and a locally staged clean ROM;
+the ROM and generated pack are never included in an APK or test artifact.
+The release engine remains ARMv7.
+
+- The actual Android upgrade path rebuilt and atomically installed a compatible
+  pack using verified existing scenery in 3.5 seconds. Save and settings test
+  files were unchanged, and setup's temporary files were removed.
+- Builder tests cover ROM rejection, incompatible recipes, verified scenery
+  reuse and fallback, Android file-copy permissions, and consistent terrain
+  summation on Python 3.11 and 3.12.
+- A full terrain rebuild under Python 3.11/Pillow 9.2 matches the release's
+  terrain byte-for-byte after the summation correction.
+- The signed ARMv7 APK passes structural checks for the matching recipe, full
+  generator closure, shared builder modules, Python runtime and Pillow.
+  Recursive publication auditing with the local clean-ROM scan passes.
+- Android save-storage, render-interpolation and terrace-foot regressions pass.
+
 ## Save and interpolation test build — 2026-10-20
 
 No Thor was connected for this build. Hardware save/restart and visual

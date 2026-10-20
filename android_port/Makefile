@@ -74,6 +74,14 @@ build/config: FORCE
 	@cmp -s build/config.new $@ || cp build/config.new $@
 	@rm -f build/config.new
 
+# The bottom menu embeds APP_VERSION; refresh it on incremental versioned builds.
+build/app-version: FORCE
+	@mkdir -p build
+	@printf '%s\n' '$(APP_VERSION)' > $@.new
+	@cmp -s $@.new $@ || cp $@.new $@
+	@rm -f $@.new
+build/bridge/3ds_bottom_ui.o: build/app-version
+
 # The game's translation units and data, with no backend: the compile half of
 # the phase 0 link spike.
 GAME_UNITS := $(FULL_C_OBJS) $(FULL_DATA_OBJS) $(filter-out build/ctr_voxel.o,$(BACKEND_OBJS))

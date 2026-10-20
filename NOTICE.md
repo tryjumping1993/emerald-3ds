@@ -34,6 +34,15 @@ only the original Emerald 3DS work.
   (BSD-style) and **Pillow** (MIT-CMU / HPND), packaged by **PyInstaller**
   (GPL 2.0 with the bootloader exception).
 
+## Bundled with the Android APK
+
+The Android APK also bundles Chaquopy 17.1 (MIT), Python 3.11 and its
+standard library (PSF License Agreement), and Pillow 9.2 (HPND/MIT-CMU),
+including its FreeType and libjpeg dependencies, for offline ROM processing.
+Python's OpenSSL dependency uses the Apache License 2.0. Licence texts are
+included under `assets/licenses` and inside the runtime packages. No desktop
+Python installation is required on the player's device.
+
 ## Game content
 
 The Thor launcher icon is newly generated Rayquaza fan artwork requested by
@@ -42,7 +51,7 @@ the maintainer, rather than extracted ROM artwork. Its provenance is in
 
 Pokémon Emerald's code, data, graphics, audio and text are © Nintendo, Game
 Freak and Creatures. None of it is included in this repository or in the
-releases; the builder produces the data pack on the player's computer from
+releases; the builder produces the data pack on the player's device from
 their own ROM.
 
 **HeartGold and SoulSilver's follower sprites and messages**, fetched by the

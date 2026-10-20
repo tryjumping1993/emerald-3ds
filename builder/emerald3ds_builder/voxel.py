@@ -9,10 +9,9 @@ The steps, their order, the copy of the scripts into the tree and the output
 checks are shared. Only the way one step is run differs:
 
 * `run_step_subprocess` runs each script in its own process (desktop and the
-  frozen Windows builder): no state can carry over between scripts. No
-  script reads another's output, so their processes run side by side, as
-  many at once as there are processors: the build takes as long as the
-  slowest (the relief), not the sum;
+  frozen Windows builder): no state can carry over between scripts. Regions
+  are prepared first; the remaining independent scenery generators run side
+  by side, as many at once as there are processors;
 * `run_step_inprocess` runs each script in this interpreter (the web builder:
   Pyodide has no processes). It gives every script a fresh copy of its sibling
   modules, its own argv, working directory and import path, and puts them all
@@ -29,7 +28,6 @@ import contextlib
 import io
 import os
 import runpy
-import shutil
 import subprocess
 import sys
 import time
@@ -142,7 +140,13 @@ def run_generators(tree: Path, voxelgen: Path, expected: list[dict], progress=No
     if not voxelgen.is_dir():
         raise BuilderError("The release is incomplete: payload/voxelgen is missing.", code="payload_incomplete")
     port = tree / "3ds_port"
-    shutil.copytree(voxelgen, port, dirs_exist_ok=True)
+    # Only file contents matter. Android can reject copytree's chmod/utime
+    # metadata preservation even for writable app-cache files.
+    for source in voxelgen.rglob("*"):
+        if source.is_file() and "__pycache__" not in source.parts and source.suffix != ".pyc":
+            target = port / source.relative_to(voxelgen)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(source.read_bytes())
     (port / "romfs" / "voxel").mkdir(parents=True, exist_ok=True)
     steps = [s for s in STEPS if (port / "scripts" / s[0]).exists()]
 
@@ -158,11 +162,15 @@ def run_generators(tree: Path, voxelgen: Path, expected: list[dict], progress=No
 
     took: dict[int, float] = {}
     if runner == "subprocess" and len(steps) > 1:
+        # Complete the initial regions step before consumers can start.
         if progress:
-            progress(0.0, ", ".join(LABELS.get(s[0], s[0]) for s in steps))
+            progress(0.0, label(0))
+        took[0] = timed(0)
+        if progress:
+            progress(1 / len(steps), label(0))
         workers = max(1, min(len(steps), os.cpu_count() or 1))
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-            running = {pool.submit(timed, i): i for i in range(len(steps))}
+            running = {pool.submit(timed, i): i for i in range(1, len(steps))}
             failed: dict[int, BaseException] = {}
             for future in concurrent.futures.as_completed(running):
                 i = running[future]

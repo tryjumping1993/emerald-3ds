@@ -44,4 +44,22 @@ class PackImportTest {
             }
         } finally { folder.deleteRecursively() }
     }
+
+    @Test fun wrongEngineKeepsPackSaveAndSettings() {
+        val folder = Files.createTempDirectory("thor-import-").toFile()
+        try {
+            val previous = folder.resolve("emerald3ds.pak").apply { writeText("previous") }
+            val save = folder.resolve("emerald3ds.sav").apply { writeText("progress") }
+            val settings = folder.resolve("settings.txt").apply { writeText("settings") }
+            assertTrue(runCatching { PackImport.install(pack().inputStream(), folder, 123) }.isFailure)
+            assertEquals("previous", previous.readText())
+            assertEquals("progress", save.readText())
+            assertEquals("settings", settings.readText())
+            PackImport.install(pack().inputStream(), folder, 0)
+            assertTrue(PackImport.isCompatible(previous, 0))
+            assertFalse(PackImport.isCompatible(previous, 123))
+            previous.writeBytes(pack().apply { this[lastIndex] = 17 })
+            assertFalse(PackImport.isCompatible(previous, 0))
+        } finally { folder.deleteRecursively() }
+    }
 }

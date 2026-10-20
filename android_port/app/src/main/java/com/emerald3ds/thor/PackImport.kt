@@ -12,7 +12,7 @@ import java.util.zip.CRC32
 
 /** Replace the pack only after a complete, synced copy. Saves and settings are separate files. */
 object PackImport {
-    fun install(input: InputStream, folder: File) {
+    fun install(input: InputStream, folder: File, expectedAbi: Long? = null) {
         folder.mkdirs()
         val pending = File(folder, "emerald3ds.pak.partial")
         try {
@@ -33,7 +33,7 @@ object PackImport {
                     output.fd.sync()
                 }
             }
-            validate(pending)
+            validate(pending, expectedAbi)
             Files.move(pending.toPath(), File(folder, "emerald3ds.pak").toPath(),
                 StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
         } finally { pending.delete() }
@@ -42,13 +42,20 @@ object PackImport {
     private fun crc(bytes: ByteArray, length: Int = bytes.size): Long = CRC32().apply { update(bytes, 0, length) }.value
 
     /** Check the complete header, index, bounds and every payload CRC before replacing a working pack. */
-    private fun validate(file: File) = RandomAccessFile(file, "r").use { source ->
+    fun isCompatible(file: File, expectedAbi: Long): Boolean =
+        runCatching { validate(file, expectedAbi) }.isSuccess
+
+    private fun validate(file: File, expectedAbi: Long? = null) = RandomAccessFile(file, "r").use { source ->
         fun check(ok: Boolean) = require(ok) { "The data pack is incomplete or damaged. Build or copy it again." }
         val header = ByteArray(64)
         source.readFully(header)
         val head = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
         fun uint(offset: Int) = head.getInt(offset).toLong() and 0xffffffffL
-        check(head.getInt(8) == 1 && crc(header, 60) == uint(60))
+        check(header.copyOfRange(0, 8).contentEquals(byteArrayOf(69, 77, 51, 68, 80, 65, 75, 0)) &&
+            head.getInt(8) == 1 && crc(header, 60) == uint(60))
+        require(expectedAbi == null || uint(12) == expectedAbi) {
+            "This data pack belongs to another app version. Choose your Emerald ROM to build the matching data."
+        }
         val count = uint(36)
         val indexOffset = head.getLong(40)
         val dataOffset = head.getLong(48)

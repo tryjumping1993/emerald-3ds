@@ -212,7 +212,10 @@ def audit(entries, allow: Allow, denylist, rom_index: RomIndex | None,
         parts = [p.lower() for p in path.parts]
         suffix = path.suffix.lower()
 
-        if suffix in FORBIDDEN_SUFFIXES:
+        # Compiled modules are required inside the APK's Python archives.
+        # Their decoded bytes still receive ROM, pack and secret checks below.
+        apk_python_bytecode = suffix == ".pyc" and "!/assets/chaquopy/" in name
+        if suffix in FORBIDDEN_SUFFIXES and not apk_python_bytecode:
             findings.append(Finding(name, "forbidden-type", suffix))
         if any(p in FORBIDDEN_DIRS for p in parts[:-1]):
             findings.append(Finding(name, "forbidden-dir"))
@@ -234,6 +237,7 @@ def audit(entries, allow: Allow, denylist, rom_index: RomIndex | None,
                 third_party_dirs.add("/".join(path.parts[:idx + 2]))
 
         data = read()
+        decoded_archive = False
         if suffix == ".apk":
             try:
                 nested = apk_files(data, name)
@@ -245,8 +249,20 @@ def audit(entries, allow: Allow, denylist, rom_index: RomIndex | None,
                 if any(p.startswith("lib/") and not p.startswith("lib/armeabi-v7a/") for p in names_in_apk):
                     findings.append(Finding(name, "apk-unsupported-abi"))
                 findings.extend(audit(nested, allow, denylist, rom_index, "apk"))
+                decoded_archive = True
             except (zipfile.BadZipFile, RuntimeError, OSError) as exc:
                 findings.append(Finding(name, "apk-invalid", str(exc)))
+        if suffix == ".imy" and "!/assets/chaquopy/" in name:
+            try:
+                nested = apk_files(data, name)
+                inner_paths = [p[len(name) + 2:] for p, _ in nested]
+                if any(p.startswith("/") or ".." in PurePosixPath(p).parts or "\\" in p
+                       for p in inner_paths):
+                    findings.append(Finding(name, "python-archive-invalid-path"))
+                findings.extend(audit(nested, allow, denylist, rom_index, "apk-python"))
+                decoded_archive = True
+            except (zipfile.BadZipFile, RuntimeError, OSError) as exc:
+                findings.append(Finding(name, "python-archive-invalid", str(exc)))
         # Unmodified third-party runtime (the bundled Python, Tk, Pillow): its
         # size, its strings and its generic constant tables are not ours to
         # judge; the checks for a ROM, a data pack or a secret still apply.
@@ -276,7 +292,9 @@ def audit(entries, allow: Allow, denylist, rom_index: RomIndex | None,
             if rx.search(data) or rx.search(name.encode("utf-8")):
                 findings.append(Finding(name, "denylist", "(local pattern)"))
                 break
-        if rom_index is not None:
+        # Inspect each decoded member rather than counting incidental matches
+        # across the compressed container and all its unrelated vendor libraries.
+        if rom_index is not None and not decoded_archive:
             scanned = data
             if data[:8] == b"EM3DRCP1":
                 # A recipe: scan what it would reveal, not its LZMA stream.

@@ -47,6 +47,7 @@ class MainActivity : Activity(), DisplayManager.DisplayListener, InputManager.In
     private var inlineView: BottomScreen? = null
     private val controls by lazy { Controls(this) }
     private var started = false
+    private var engineStarted = false
     private var engineVisible = false
     private var refreshHz = 120
     internal val requestedRefresh: Int get() = refreshHz
@@ -151,12 +152,27 @@ class MainActivity : Activity(), DisplayManager.DisplayListener, InputManager.In
     private fun startEngine() {
         NativeBridge.showMessage("Preparing game files...")
         thread(name = "AssetExtract") {
-            Assets.extractIfNeeded(applicationContext)
+            val ready = runCatching {
+                Assets.extractIfNeeded(applicationContext)
+                val abi = RomBuilder.expectedAbi(applicationContext)
+                abi == null || PackImport.isCompatible(RomBuilder.dataFolder(applicationContext).resolve("emerald3ds.pak"), abi)
+            }
             handler.post {
                 if (isFinishing || isDestroyed) return@post
+                if (ready.isFailure) {
+                    Log.e(TAG, "Game setup failed", ready.exceptionOrNull())
+                    NativeBridge.showMessage("Game files could not be prepared. Please reopen the app.")
+                    return@post
+                }
+                if (!ready.getOrThrow()) {
+                    NativeBridge.showMessage("Choose your Emerald ROM to prepare this version's game data.")
+                    openRomBuilder(true)
+                    return@post
+                }
                 NativeBridge.showMessage("")
                 val external = (getExternalFilesDir(null) ?: filesDir).resolve("emerald3ds").apply { mkdirs() }
-                if (!NativeBridge.nativeStart(filesDir.path + "/", external.path + "/")) NativeBridge.showMessage("The engine could not start.")
+                engineStarted = NativeBridge.nativeStart(filesDir.path + "/", external.path + "/")
+                if (!engineStarted) NativeBridge.showMessage("The engine could not start.")
             }
         }
     }
@@ -289,8 +305,9 @@ class MainActivity : Activity(), DisplayManager.DisplayListener, InputManager.In
     private fun showAndroidMenu() {
         controls.reset()
         AlertDialog.Builder(this).setTitle("Emerald 3DS for Thor")
-            .setItems(arrayOf("Controller buttons", "Import game data pack")) { _, which ->
+            .setItems(arrayOf("Controller buttons", "Choose Emerald ROM", "Import data pack (advanced)")) { _, which ->
                 if (which == 0) controls.show()
+                else if (which == 1) openRomBuilder(false)
                 else {
                     @Suppress("DEPRECATION")
                     startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -301,25 +318,44 @@ class MainActivity : Activity(), DisplayManager.DisplayListener, InputManager.In
             }.setNegativeButton("Return to game", null).show()
     }
 
+    @Suppress("DEPRECATION")
+    private fun openRomBuilder(reuse: Boolean) {
+        startActivityForResult(Intent(this, RomImportActivity::class.java).putExtra("reuse", reuse), 2)
+    }
+
+    private fun gameDataReady() {
+        if (!engineStarted) startEngine()
+        else AlertDialog.Builder(this).setTitle("Game data ready")
+            .setMessage("Reopen Emerald 3DS to use the new data. Your save and settings are kept.")
+            .setPositiveButton("Close app") { _, _ -> finishAndRemoveTask() }.show()
+    }
+
     @Deprecated("Uses the Activity result API available on all supported Android versions")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 2) {
+            if (resultCode == RESULT_OK) gameDataReady()
+            else if (!engineStarted) AlertDialog.Builder(this).setTitle("Emerald ROM needed")
+                .setMessage("Choose your Emerald ROM to prepare the game data on this device.")
+                .setPositiveButton("Choose ROM") { _, _ -> openRomBuilder(false) }
+                .setNegativeButton("Close app") { _, _ -> finishAndRemoveTask() }.show()
+            return
+        }
         if (requestCode != 1 || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
         NativeBridge.showMessage("Importing game data...")
         thread(name = "PackImport") {
             val error = runCatching {
                 val folder = (getExternalFilesDir(null) ?: filesDir).resolve("emerald3ds")
-                PackImport.install(contentResolver.openInputStream(uri) ?: error("The file could not be opened."), folder)
+                PackImport.install(contentResolver.openInputStream(uri) ?: error("The file could not be opened."), folder,
+                    RomBuilder.expectedAbi(applicationContext))
             }.exceptionOrNull()
             handler.post {
                 if (isFinishing || isDestroyed) return@post
                 NativeBridge.showMessage("")
                 if (error != null) AlertDialog.Builder(this).setTitle("Import failed")
                     .setMessage(error.message).setPositiveButton("OK", null).show()
-                else AlertDialog.Builder(this).setTitle("Game data imported")
-                    .setMessage("Close and reopen Emerald 3DS to use this pack. Your save and settings are kept.")
-                    .setPositiveButton("Close app") { _, _ -> finishAndRemoveTask() }.show()
+                else gameDataReady()
             }
         }
     }

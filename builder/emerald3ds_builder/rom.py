@@ -53,7 +53,10 @@ def _unzip(data: bytes) -> bytes:
         names = [n for n in zf.namelist() if n.lower().endswith((".gba", ".agb", ".bin"))]
         if len(names) != 1:
             raise BuilderError("The ZIP file must contain exactly one .gba file.", code="rom_zip_contents")
-        return zf.read(names[0])
+        if zf.getinfo(names[0]).file_size > ROM_SIZE:
+            raise BuilderError("The ROM inside the ZIP is larger than a GBA cartridge.", code="rom_too_large")
+        with zf.open(names[0]) as source:
+            return source.read(ROM_SIZE + 1)
 
 
 def header(data: bytes) -> tuple[str, str]:

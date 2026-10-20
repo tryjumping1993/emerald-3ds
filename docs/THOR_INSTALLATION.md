@@ -7,32 +7,33 @@ available on this target.
 
 ## Install
 
-1. Download the release's Windows builder and the matching Thor APK.
-2. In the builder, choose **thor**, select your own supported Emerald ROM,
-   and choose an output folder. Each language needs its matching Thor
-   payload; a 3DS data pack cannot be used with the Android executable.
-3. Copy `Emerald3DS-Thor.apk` and `emerald3ds.pak` from the output's
-   `emerald3ds/` folder to the Thor, for example into Downloads.
-4. Open the APK in Android's file manager and allow installation from that
-   source when Android asks. Start **Emerald 3DS Thor**.
-5. Press Android **Back**, select **Import game data pack**, and choose
-   `emerald3ds.pak`. After import, close and reopen the app as prompted.
+1. Download **Emerald3DS-Thor.apk** from the release and install it on the Thor.
+   For an update, install over the existing app so your progress stays in place.
+2. Open **Emerald 3DS Thor**. If game data is missing or belongs to an older
+   version, setup opens automatically.
+3. Tap **Choose Emerald ROM** and select your own clean **English Emerald
+   (BPEE)** `.gba` file, or a ZIP containing it, from Android's file picker.
+4. Wait while the Thor prepares the game data. The APK includes the builder,
+   runtime, scenery generators and its matching reconstruction recipe. This
+   works offline and does not require a computer, another app or a downloaded
+   `.pak` file. The game starts after verification and installation finish.
 
-The importer verifies the complete header, index and every file's CRC
-before replacing an existing pack. The engine also checks the pack's ABI
-against the installed executable. If it reports a mismatch, build the pack
-from the same release and language as the APK.
+The ROM is processed locally. Its temporary copy is deleted after the build.
+The app remembers the document permission when the provider allows it, so a
+later APK update can rebuild automatically from the same selected ROM. If the
+file moved or access expired, choose it again.
 
-For command-line builds:
+An interrupted, cancelled or failed build keeps the previous pack, save and
+settings. The new pack is fully verified before replacing the old one.
+The first build includes scenery generation and can take several minutes;
+keep the setup screen open until it finishes.
+Updates reuse scenery from the previous pack when every generated file still
+matches the new release, so those updates avoid repeating the scenery build.
 
-```text
-emerald3ds-builder build --target thor --rom emerald.gba --output out
-emerald3ds-builder verify --target thor --pak out/emerald3ds/emerald3ds.pak
-```
-
-The repository's implementation is ahead of its published releases. Use a
-release only when it includes the Thor APK and `payload/android/` recipes;
-an older 3DS-only builder does not include this target.
+**Back → Choose Emerald ROM** starts setup manually. **Import data pack
+(advanced)** still accepts a prebuilt pack, checks it against the installed
+engine and leaves saves/settings alone. Desktop and web builders remain
+optional alternatives, not requirements for Android installation.
 
 ## Controls and displays
 
@@ -78,8 +79,9 @@ same key preserves it. A release signed with another key cannot update a
 development APK in place; back up before uninstalling that build.
 
 Save in game before importing an update's pack and closing the app.
-Install the new APK, import its matching pack if required, then reopen.
-Pack import replaces only the pack, leaving save and settings files alone.
+Install the new APK over the existing app. If the data changed, the app
+prepares a new pack from your selected ROM or asks you to choose it again.
+Only the pack is replaced; saves, settings and controller mappings stay.
 
 Useful optional lines in `settings.txt`:
 

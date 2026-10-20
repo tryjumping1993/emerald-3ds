@@ -36,6 +36,7 @@ Invoke-Checked $python @('-m', 'unittest', 'discover', '-s', 'tools/tests', '-v'
 Invoke-Checked $python @('tools/bootstrap.py')
 Invoke-Checked $make @('-C', 'build/upstream', '-j16', 'tools', "PYTHON=$python")
 Invoke-Checked $make @('-C', 'build/upstream', '-j16', 'generated', "PYTHON=$python")
+Invoke-Checked $python @('-m', 'unittest', 'discover', '-s', 'builder/tests', '-v')
 Invoke-Checked $python @('android_port/tests/save_storage_test.py', '--cc', 'gcc')
 Invoke-Checked $python @('android_port/tests/interpolation_test.py', '--cc', 'gcc')
 Invoke-Checked $python @('3ds_port/tests/voxel_seam_test.py', '--cc', 'gcc')

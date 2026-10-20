@@ -17,5 +17,8 @@
         <activity android:name=".CompanionActivity" android:exported="false" android:screenOrientation="sensorLandscape"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:resizeableActivity="true" android:excludeFromRecents="true" />
+        <activity android:name=".RomImportActivity" android:exported="false" android:process=":builder"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden" />
     </application>
 </manifest>

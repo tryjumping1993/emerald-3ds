@@ -108,7 +108,8 @@ class Progress:
 
 def build_pack(rom_path: Path, payload: Payload, out_pak: Path, progress=None,
                keep_workdir: bool = False, runner: str = "subprocess", rom: Rom | None = None,
-               follower_fetcher: "followers.Fetcher | None | bool" = True) -> dict:
+               follower_fetcher: "followers.Fetcher | None | bool" = True,
+               generated_cache: Path | None = None) -> dict:
     """Generate emerald3ds.pak from the ROM. Returns a summary.
 
     `runner` picks how the voxel generators run (see voxel.py); `rom` lets a
@@ -150,7 +151,21 @@ def build_pack(rom_path: Path, payload: Payload, out_pak: Path, progress=None,
             report(0.05 + 0.45 * i / max(total, 1), "Extracting game data")
     timings.append(("extract", time.perf_counter() - start))
 
-    if recipe.generated:
+    cached = {}
+    if recipe.generated and generated_cache is not None:
+        try:
+            with pak.PakReader(generated_cache) as previous:
+                for item in recipe.generated:
+                    data = previous.read(item["path"])
+                    if len(data) != item["size"] or zlib.crc32(data) & 0xFFFFFFFF != item["crc"]:
+                        break
+                    cached[item["path"]] = data
+        except (OSError, KeyError, pak.PakError):
+            cached = {}
+    if recipe.generated and len(cached) == len(recipe.generated):
+        files.update(cached)
+        report(0.9, "Reusing verified scenery")
+    elif recipe.generated:
         work = Path(tempfile.mkdtemp(prefix="emerald3ds-"))
         try:
             report(0.5, "Preparing the 3D scenery inputs")

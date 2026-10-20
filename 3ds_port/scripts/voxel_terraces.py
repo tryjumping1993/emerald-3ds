@@ -53,6 +53,7 @@ gen_voxel_relief.py runs it over its own output for the maps in GROUPS
 
 import argparse
 import collections
+import math
 import os
 import sys
 
@@ -1346,7 +1347,7 @@ def lattice(c, flat, init):
             best, best_cost = here, None
             for v in cand:
                 value[p] = v
-                total = sum(cost(cell) for cell in cells_at[p]) + 0.01 * abs(v - init_of(p, cells_at, points_of, init)) / LEVEL
+                total = math.fsum(cost(cell) for cell in cells_at[p]) + 0.01 * abs(v - init_of(p, cells_at, points_of, init)) / LEVEL
                 if best_cost is None or total < best_cost - 1e-9:
                     best, best_cost = v, total
             value[p] = best
@@ -1539,7 +1540,7 @@ def blocks(c, U, flat, kept=None):
                 # behind a face's foot, or a band's under a face or a band,
                 # rock rising is a pit between two walls
                 back = 0.3 if north == "F" or (north != "S" and south == "F") else pit[0]
-            total += sum(step(p, q, back) for p, q in zip(a, b)) / (N + 1)
+            total += math.fsum(step(p, q, back) for p, q in zip(a, b)) / (N + 1)
         total += 0.25 * abs(piece[1] - U[cell]) / LEVEL
         if piece[0] in CORNERS:
             total += CORNER
@@ -2029,7 +2030,7 @@ def unstand(c, pieces, flat, kept):
         for n, mine, its in round_it(cell):
             e = nb(n, its)
             if e is not None:
-                total += sum(abs(a - b) for a, b in zip(edge(g, mine), e))
+                total += math.fsum(abs(a - b) for a, b in zip(edge(g, mine), e))
         return total
 
     for _ in range(2):
@@ -2571,8 +2572,8 @@ def low_side(c, cell):
     n = len(js)
     mj = sum(js) / n
     mx = sum(rows[j] for j in js) / n
-    sj = sum((j - mj) ** 2 for j in js) or 1.0
-    slope = sum((j - mj) * (rows[j] - mx) for j in js) / sj
+    sj = math.fsum((j - mj) ** 2 for j in js) or 1.0
+    slope = math.fsum((j - mj) * (rows[j] - mx) for j in js) / sj
     out = []
     for j in range(16):
         e = rows[j] if j in rows else mx + slope * (j - mj)

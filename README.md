@@ -40,6 +40,11 @@ Emerald 3DS brings the adventure to Nintendo 3DS as
 interface on the bottom screen replaces the START menu. Enable the optional
 **voxel overworld** to explore supported areas from a new angle.
 
+For the **AYN Thor Android port**, install the release APK and select your
+own Emerald ROM directly on the device. The app builds its matching game data
+offline and keeps existing saves across updates. See the
+[Thor installation guide](docs/THOR_INSTALLATION.md).
+
 ## Screenshots
 
 <p align="center"><em>A look at the adventure across both screens.</em></p>

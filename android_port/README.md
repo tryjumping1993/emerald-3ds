@@ -3,9 +3,18 @@
 The Java/Kotlin shell, the JNI + EGL host (`src/android_host.c`) and a self-test engine (`host_test/`).
 The engine backend links against `include/android_host.h`; the host never includes engine headers.
 
+## On-device game setup
+
+Install the release APK, open the app and choose your clean English Emerald
+ROM. Missing/outdated packs trigger setup automatically. The offline builder
+runs in a separate `:builder` process and atomically installs the verified
+pack. A saved document grant can be reused on later updates. Saves/settings
+are kept; a cancelled or interrupted build leaves the previous pack in place.
+
 ## Build and install
 
-Gradle root is this directory. Needs JDK 17 to 21 (JDK 25 breaks the Kotlin plugin; Android Studio's `jbr` works),
+Gradle root is this directory. The bundled ROM builder needs a Python 3.11
+build interpreter (`-PthorBuildPython=PATH`) for Chaquopy and Pillow. Needs JDK 17 to 21 (JDK 25 breaks the Kotlin plugin; Android Studio's `jbr` works),
 the Android SDK with NDK 27.3.13750724 and CMake 3.31.6. Put `sdk.dir=<sdk path>` in the git-ignored `local.properties`.
 
     export JAVA_HOME=<jdk 17-21> ANDROID_HOME=<sdk>

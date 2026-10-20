@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.2 — 2026-10-20 (Thor test build)
+
+- Install the APK over the existing app and choose your clean English Emerald
+  (BPEE) `.gba` or ZIP directly on Android. The
+  bundled offline builder generates and verifies the matching pack, including
+  voxel scenery; no Windows builder or second device is needed.
+- Missing or outdated game data opens setup before the engine starts. Saved
+  ROM document access can be reused after updates. Setup runs in a separate
+  process, shows progress, and preserves the previous pack on failure/cancel.
+  Saves and settings remain in place.
+- Updates reuse previously generated scenery after checking it against the
+  new recipe, avoiding a full scenery rebuild when those files are unchanged.
+- Signed releases now bundle and verify their own matching recipe and builder
+  runtime. Publication audits inspect the embedded Python archives recursively.
+- Terrain generation uses consistent floating-point summation across the
+  embedded Python runtime and release builders.
+- Includes the save-driver fix and independent frame interpolation from 0.4.1.
+
 ## 0.4.1 — 2026-10-20 (Thor test build)
 
 - Android saving selects a file-backed flash driver directly instead of

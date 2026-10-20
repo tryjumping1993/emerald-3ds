@@ -70,7 +70,19 @@ def tool_environment(args) -> tuple[dict, Path, Path]:
     return env, sdk, ndk
 
 
+def builder_inputs(args):
+    """Local reconstruction inputs are never placed in the APK or committed."""
+    config = Path.home() / ".android/emerald3ds-thor-builder.json"
+    values = json.loads(config.read_text(encoding="utf-8")) if config.is_file() else {}
+    for field in ("rom", "gba_elf", "build_python"):
+        if getattr(args, field) is None and values.get(field):
+            setattr(args, field, Path(values[field]))
+    if args.release and (args.rom is None or args.gba_elf is None):
+        raise SystemExit("An APK release needs --rom and --gba-elf (or the local Thor builder configuration) for on-device ROM import.")
+
+
 def build(args, env: dict, ndk: Path) -> Path:
+    builder_inputs(args)
     tree = args.tree.resolve()
     sync(tree)
     # apk-files replaces these generated directories. Check their absolute bounds before make runs.
@@ -106,11 +118,26 @@ def build(args, env: dict, ndk: Path) -> Path:
             raise SystemExit("Refusing to replace an assets directory outside build/.")
         shutil.rmtree(assets)
     shutil.copytree(output / "romfs", assets / "romfs")
+    if args.rom is not None and args.gba_elf is not None:
+        recipe = build_root / "android-builder.recipe"
+        version = args.version[0] if args.version else "0.4.0-dev"
+        run([sys.executable, ROOT / "tools/gen_recipe.py", "--romfs", tree / "3ds_port/romfs",
+             "--rom", args.rom.resolve(), "--out", recipe, "--release", "v" + version,
+             "--elf", tree / "3ds_port/emerald3ds.elf", "--gba-elf", args.gba_elf.resolve(),
+             "--image-elf", tree / "3ds_port/build/gamedata_image.elf",
+             "--image-map", tree / "3ds_port/build/gamedata_image.map",
+             "--decomp", tree, "--nm", args.msys.resolve() / "ucrt64/bin/arm-none-eabi-nm.exe"], env=env)
+        run([sys.executable, ROOT / "tools/stage_android_builder.py", "--recipe", recipe,
+             "--assets", assets, "--port", tree / "3ds_port"], env=env)
     gradle = ROOT / "android_port" / "gradlew.bat"
     gradle_args = [gradle, "assembleRelease" if args.release else "assembleDebug",
                    "-Pemerald3dsLib=" + (output / "lib").as_posix(), "-Pemerald3dsAssets=" + assets.as_posix()]
+    if args.release:
+        gradle_args += ["testReleaseUnitTest", "lintRelease"]
     if args.version:
         gradle_args += ["-PthorVersionName=" + args.version[0], "-PthorVersionCode=" + str(args.version[1])]
+    if args.build_python:
+        gradle_args.append("-PthorBuildPython=" + args.build_python.resolve().as_posix())
     run(gradle_args,
         cwd=ROOT / "android_port", env=env)
     kind = "release" if args.release else "debug"
@@ -118,6 +145,7 @@ def build(args, env: dict, ndk: Path) -> Path:
     if args.release:
         signed = build_root / "Emerald3DS-Thor.apk"
         shutil.copy2(apk, signed)
+        run([sys.executable, ROOT / "tools/verify_android_builder.py", signed], env=env)
         run([sys.executable, ROOT / "tools/release_audit.py", "--apk", signed, "--strict"], env=env)
     return apk
 
@@ -136,6 +164,9 @@ def main():
     parser.add_argument("--version", type=release_version, help="release tag, also sets the Android version code")
     parser.add_argument("--commit", help="port commit recorded in the native build log")
     parser.add_argument("--skip-pack", action="store_true", help="build only the engine APK, without a local data pack")
+    parser.add_argument("--rom", type=Path, help="local clean ROM used to generate the APK's reconstruction recipe")
+    parser.add_argument("--gba-elf", type=Path, help="original GBA ELF matching the local ROM")
+    parser.add_argument("--build-python", type=Path, help="Python 3.11 executable for the Android builder runtime")
     parser.add_argument("--continue-save", action="store_true", help="run: send Start/A to reach Continue")
     parser.add_argument("--display", help="shot: physical display id from adb shell dumpsys SurfaceFlinger --display-id")
     parser.add_argument("--out", type=Path, default=ROOT / "build/thor-shot.png")

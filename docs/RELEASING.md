@@ -14,7 +14,8 @@ runner and work directory.
 
 The workflow checks out the tag, bootstraps the pinned game sources and
 patches, runs focused terrain/gameplay checks, builds a signed release APK,
-verifies its signing certificate, and runs the publication audits. It creates
+generates the matching reconstruction recipe, verifies the bundled offline
+builder and signing certificate, and runs recursive publication audits. It creates
 a **draft GitHub release** containing only `Emerald3DS-Thor.apk` and
 `SHA256SUMS.txt`, with changelog highlights followed by GitHub-generated release
 notes. The matching version heading in `CHANGELOG.md` is used when present,
@@ -43,12 +44,16 @@ Git, GitHub CLI, and the maintainer-local signing configuration described in
 SHA-256 fingerprint. The private signing file and keystore stay outside the
 checkout. The startup task supplies `ANDROID_HOME`, `JAVA_HOME`,
 `MSYS2_ROOT`, `EMERALD_PYTHON` (Python 3.11 or newer) and an isolated Gradle cache.
+The maintainer-local `~/.android/emerald3ds-thor-builder.json` supplies
+`rom`, `gba_elf` and `build_python` paths for recipe generation and the
+Python 3.11 build interpreter. Those files and paths stay on this machine.
 Only tag pushes and explicit manual
 runs use this runner; pull request CI uses GitHub-hosted runners.
 
 This APK-only workflow does not generate the full upstream website/Windows
-builder release below. Players still need a matching privately generated data
-pack; ROMs, data packs and signing keys are never uploaded.
+builder release below. The APK includes its matching recipe and an offline Android builder, so
+players install the APK and supply their ROM on-device. ROMs, generated data
+packs and signing keys are never uploaded.
 
 | Asset | For |
 |---|---|

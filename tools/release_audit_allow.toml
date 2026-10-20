@@ -56,4 +56,14 @@ globs = []
 # The builder's PyInstaller runtime: Python, Tcl/Tk, Pillow and their DLLs,
 # shipped unmodified under their own licenses. Checked for ROMs, data packs
 # and secrets, not for size or incidental byte runs.
-globs = ["Emerald3DS-v*-Windows/_internal/*"]
+globs = [
+    "Emerald3DS-v*-Windows/_internal/*",
+    # Pinned, unmodified Chaquopy Python 3.11 and Pillow 9.2 runtime.
+    # .imy ZIP members are inspected recursively, including ROM/pack/secret checks.
+    "*!/assets/chaquopy/stdlib-*.imy*",
+    "*!/assets/chaquopy/requirements-*.imy*",
+    "*!/assets/chaquopy/bootstrap.imy*",
+    "*!/assets/chaquopy/bootstrap-native/*",
+    "*!/lib/armeabi-v7a/libpython*.so",
+    "*!/lib/armeabi-v7a/libcrypto_python.so",
+]

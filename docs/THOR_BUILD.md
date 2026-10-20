@@ -19,6 +19,30 @@ pokeemerald checkout (the patches have LF endings).
 
 ## Build
 
+A release APK includes an offline ROM builder. Gradle embeds Chaquopy 17.1,
+Python 3.11 (for ARMv7) and Pillow 9.2.0. The desktop/web builder core is
+staged automatically, without its desktop UI. A build-host Python 3.11
+interpreter is required; pass `--build-python PATH` to the helper.
+
+For complete APKs, use the helper after bootstrapping:
+
+```text
+python tools/thor_dev.py build --release --skip-pack --rom emerald.gba --gba-elf original-gba.elf --build-python PATH_TO_PYTHON_311 --version 0.4.2
+```
+
+The ROM and original GBA ELF are local recipe-generation inputs. They never
+enter the APK. The helper generates the recipe against the newly linked
+engine, checks its literal budgets and reconstruction, stages the generator
+scripts, runs Android unit tests/lint, verifies the APK's builder contents and
+signature, and audits the recursively unpacked Python archives.
+
+Instead of repeating the three paths, a maintainer-local
+`~/.android/emerald3ds-thor-builder.json` may contain `rom`, `gba_elf` and
+`build_python`. Explicit command-line paths take precedence. Keep this local
+configuration out of Git. A release without these inputs fails before building.
+The lower-level commands below are useful for engine-only development.
+
+
 ```
 export PATH="/c/msys64/ucrt64/bin:/c/msys64/usr/bin:<ndk>/prebuilt/windows-x86_64/bin:$PATH"
 python tools/bootstrap.py                       # pins pokeemerald, applies the patches, places the ports

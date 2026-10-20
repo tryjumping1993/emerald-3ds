@@ -964,7 +964,9 @@ def _gauss_seidel(n, pairs, fixed, iterations=4000):
         for r in range(n):
             if r in fixed or not adj[r]:
                 continue
-            v = sum(w * (h[o] + d) for (o, d, w) in adj[r]) / sum(w for (_, _, w) in adj[r])
+            # Python 3.12 changed float sum's rounding. Use the same accurate
+            # summation on the Android 3.11 runtime and the release builder.
+            v = math.fsum(w * (h[o] + d) for (o, d, w) in adj[r]) / math.fsum(w for (_, _, w) in adj[r])
             delta = max(delta, abs(v - h[r]))
             h[r] = v
         if delta < 0.001:
@@ -981,7 +983,7 @@ def _robust(n, samples, fixed, hard=()):
         return v[len(v) // 2]
     tie = {k: (0.0, HARD_WEIGHT) for k in hard}
     first = dict(tie)
-    first.update({k: (median([d for d, _ in v]), sum(w for _, w in v))
+    first.update({k: (median([d for d, _ in v]), math.fsum(w for _, w in v))
                   for k, v in samples.items() if k not in tie})
     first = _gauss_seidel(n, first, fixed)
     kept = dict(tie)
@@ -990,7 +992,7 @@ def _robust(n, samples, fixed, hard=()):
             continue
         good = [(d, w) for d, w in v if abs(first[a] - first[b] - d) <= 8]
         if good:
-            kept[(a, b)] = (median([d for d, _ in good]), sum(w for _, w in good))
+            kept[(a, b)] = (median([d for d, _ in good]), math.fsum(w for _, w in good))
     return _gauss_seidel(n, kept, fixed), kept
 
 
@@ -1010,7 +1012,7 @@ def _give_up_seams(n, samples, fixed):
     def median(v):
         v = sorted(v)
         return v[len(v) // 2]
-    pairs = {k: (median([d for d, _ in v]), sum(w for _, w in v)) for k, v in samples.items()}
+    pairs = {k: (median([d for d, _ in v]), math.fsum(w for _, w in v)) for k, v in samples.items()}
     while True:
         off = _gauss_seidel(n, pairs, fixed)
         worst, err = None, 8.0
@@ -3841,7 +3843,7 @@ def cell_shapes(lid, roles_layout, h, cut):
                     continue
                 d = [r for r in around[1:3] if r is not None]
                 if d:
-                    flank_frac[(c, i, j)] = sum(d) / len(d)
+                    flank_frac[(c, i, j)] = math.fsum(d) / len(d)
     for c in sorted(content, key=lambda c: (c[1], c[0])):
         g = [row[:] for row in grid(c)]
         for j in range(P + 1):
