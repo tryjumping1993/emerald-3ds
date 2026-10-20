@@ -323,11 +323,11 @@ ROOT_MID_DEPS := $(wildcard $(ROOT)/sound/songs/midi/*.mid) $(ROOT)/sound/songs/
 MID_CHUNK ?= 0
 build/midi.stamp: $(ROOT_MID_DEPS)
 ifeq ($(MID_CHUNK),0)
-	+$(MAKE) -C $(ROOT) $(patsubst $(ROOT)/%,%,$(ROOT_MID_SRCS))
+	+"$(MAKE)" -C $(ROOT) $(patsubst $(ROOT)/%,%,$(ROOT_MID_SRCS))
 else
 	@mkdir -p build
 	$(file >build/midi.list,$(patsubst $(ROOT)/%,%,$(ROOT_MID_SRCS)))
-	tr -d '\015' < build/midi.list | xargs -n $(MID_CHUNK) $(MAKE) -C $(ROOT)
+	tr -d '\015' < build/midi.list | xargs -n $(MID_CHUNK) "$(MAKE)" -C $(ROOT)
 endif
 	@mkdir -p build
 	@touch $@
@@ -348,7 +348,7 @@ build/root/data/map_events.o build/root/data/maps.o: build/map_includes.stamp
 
 # Sample conversion, with the flags the root audio_rules.mk uses.
 $(WAV2AGB): $(wildcard $(ROOT)/tools/wav2agb/*.cpp $(ROOT)/tools/wav2agb/*.h)
-	$(MAKE) -C $(ROOT)/tools/wav2agb
+	"$(MAKE)" -C $(ROOT)/tools/wav2agb
 
 $(ROOT)/sound/direct_sound_samples/cries/%.bin: $(ROOT)/sound/direct_sound_samples/cries/%.wav | $(WAV2AGB)
 	"$(WAV2AGB)" -b -c -l 1 --no-pad $< $@
@@ -426,7 +426,7 @@ $(ROMFS_GAMEDATA_OUTS) &: build/gamedata_image.elf $(TARGET).elf scripts/gen_gam
 
 # Host world/atlas fixtures include global.h's generated map constants.
 $(MAPJSON): $(wildcard $(ROOT)/tools/mapjson/*.cpp $(ROOT)/tools/mapjson/*.h)
-	$(MAKE) -C $(ROOT)/tools/mapjson
+	"$(MAKE)" -C $(ROOT)/tools/mapjson
 
 $(ROOT)/include/constants/map_groups.h: $(ROOT)/data/maps/map_groups.json $(wildcard $(ROOT)/data/maps/*/map.json) | $(MAPJSON)
 	"$(MAPJSON)" groups emerald $< $(ROOT)/data/maps $(ROOT)/include/constants
@@ -459,11 +459,11 @@ VOXEL_GFX_OUTPUTS += $(patsubst %.pal,%.gbapal,$(filter %.pal,$(VOXEL_GFX_SOURCE
 ifneq ($(strip $(VOXEL_GFX_OUTPUTS)),)
 $(VOXEL_GFX_OUTPUTS) &: $(VOXEL_GFX_SOURCES)
 ifeq ($(MID_CHUNK),0)
-	+$(MAKE) -C $(ROOT) $(patsubst $(ROOT)/%,%,$(VOXEL_GFX_OUTPUTS))
+	+"$(MAKE)" -C $(ROOT) $(patsubst $(ROOT)/%,%,$(VOXEL_GFX_OUTPUTS))
 else
 	@mkdir -p build
 	$(file >build/gfx.list,$(patsubst $(ROOT)/%,%,$(VOXEL_GFX_OUTPUTS)))
-	tr -d '\015' < build/gfx.list | xargs -n $(MID_CHUNK) $(MAKE) -C $(ROOT)
+	tr -d '\015' < build/gfx.list | xargs -n $(MID_CHUNK) "$(MAKE)" -C $(ROOT)
 endif
 romfs/voxel/regions.bin romfs/voxel/signposts.bin romfs/voxel/buildings.bin romfs/voxel/relief.bin romfs/stage/leaves.bin: $(VOXEL_GFX_OUTPUTS)
 endif
