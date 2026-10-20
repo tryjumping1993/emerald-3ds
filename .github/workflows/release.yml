@@ -50,7 +50,7 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             throw 'This release already exists. Review it instead of replacing its APK.'
           }
-          $options = @('--draft', '--verify-tag', '--generate-notes', '--title', "Emerald3DS Thor $env:RELEASE_TAG")
+          $options = @('--draft', '--verify-tag', '--generate-notes', '--notes-file', 'build/release/NOTES.md', '--title', "Emerald3DS Thor $env:RELEASE_TAG")
           if ($env:RELEASE_TAG.Contains('-')) { $options += '--prerelease' }
           gh release create $env:RELEASE_TAG @options build/release/Emerald3DS-Thor.apk build/release/SHA256SUMS.txt
           if ($LASTEXITCODE) { throw 'GitHub release creation failed.' }

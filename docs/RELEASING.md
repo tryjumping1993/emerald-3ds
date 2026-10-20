@@ -16,7 +16,9 @@ The workflow checks out the tag, bootstraps the pinned game sources and
 patches, runs focused terrain/gameplay checks, builds a signed release APK,
 verifies its signing certificate, and runs the publication audits. It creates
 a **draft GitHub release** containing only `Emerald3DS-Thor.apk` and
-`SHA256SUMS.txt`, with GitHub-generated release notes. Review the notes and
+`SHA256SUMS.txt`, with changelog highlights followed by GitHub-generated release
+notes. The matching version heading in `CHANGELOG.md` is used when present,
+otherwise the `Unreleased` section supplies the highlights. Review the notes and
 publish the draft from the fork's Releases page. Prerelease tags such as
 `v0.4.1-beta.1` mark the draft as a prerelease. Existing releases are never
 overwritten by a rerun.

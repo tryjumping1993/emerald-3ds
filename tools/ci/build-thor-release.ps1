@@ -52,4 +52,12 @@ New-Item -ItemType Directory -Force 'build/release' | Out-Null
 Copy-Item -LiteralPath $apk -Destination 'build/release/Emerald3DS-Thor.apk' -Force
 $hash = (Get-FileHash -LiteralPath $apk -Algorithm SHA256).Hash.ToLowerInvariant()
 [IO.File]::WriteAllText((Join-Path $PWD 'build/release/SHA256SUMS.txt'), "$hash  Emerald3DS-Thor.apk`n")
+$changelog = Get-Content -LiteralPath 'CHANGELOG.md' -Raw
+$heading = [regex]::Escape(($version -replace '^v', '' -split '-')[0])
+$notes = [regex]::Match($changelog, "(?ms)^## $heading(?:\s|$)[^\n]*\n(.*?)(?=^## |\z)")
+if (-not $notes.Success) {
+    $notes = [regex]::Match($changelog, '(?ms)^## Unreleased[^\n]*\n(.*?)(?=^## |\z)')
+}
+if (-not $notes.Success) { throw 'Add release highlights to CHANGELOG.md before tagging.' }
+[IO.File]::WriteAllText((Join-Path $PWD 'build/release/NOTES.md'), $notes.Groups[1].Value.Trim() + "`n")
 Write-Output "Verified release certificate: $($fingerprint.Groups[1].Value)"
