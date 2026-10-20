@@ -164,16 +164,16 @@ build/emerald3ds_release.ld: $(ANDROID_ROOT)/emerald3ds_android.ld.in
 # Both links see the same objects: the image keeps .gamedata's contents so the bundle
 # generators can read them; the shipped library reserves it.
 SO_LINK = "$(CC)" $(ARCH) -shared -fuse-ld=lld -Wl,--gc-sections -Wl,--emit-relocs -Wl,-z,max-page-size=4096 \
-	-Wl,--version-script,$(ANDROID_ROOT)/exports.map $(LDFLAGS) -Wl,-T,build/emerald3ds_$(1).ld -Wl,-Map,build/$(2).map @build/link.rsp $(SO_LIBS) -o $(3)
+	-Wl,--version-script,$(ANDROID_ROOT)/exports.version $(LDFLAGS) -Wl,-T,build/emerald3ds_$(1).ld -Wl,-Map,build/$(2).map @build/link.rsp $(SO_LIBS) -o $(3)
 
 # The ELF names are the 3DS build's, so that full.mk's rules for the asset table, the
 # script, song and game data bundles (which read them) apply as they are; the shipped
 # library is the same file under the name Android loads.
-build/gamedata_image.elf: $(SO_OBJECTS) build/emerald3ds_image.ld
+build/gamedata_image.elf: $(SO_OBJECTS) build/emerald3ds_image.ld $(ANDROID_ROOT)/exports.version
 	$(file >build/link.rsp,$(SO_OBJECTS))
 	$(call SO_LINK,image,gamedata_image,$@)
 
-$(TARGET).elf: $(SO_OBJECTS) build/emerald3ds_release.ld
+$(TARGET).elf: $(SO_OBJECTS) build/emerald3ds_release.ld $(ANDROID_ROOT)/exports.version
 	$(file >build/link.rsp,$(SO_OBJECTS))
 	$(call SO_LINK,release,$(TARGET),$@)
 
