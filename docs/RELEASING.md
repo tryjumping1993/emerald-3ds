@@ -38,7 +38,8 @@ Git, GitHub CLI, and the maintainer-local signing configuration described in
 `ANDROID_SIGNING_CERT_SHA256` to the existing Thor release certificate's
 SHA-256 fingerprint. The private signing file and keystore stay outside the
 checkout. The startup task supplies `ANDROID_HOME`, `JAVA_HOME`,
-`MSYS2_ROOT` and an isolated Gradle cache. Only tag pushes and explicit manual
+`MSYS2_ROOT`, `EMERALD_PYTHON` (Python 3.11 or newer) and an isolated Gradle cache.
+Only tag pushes and explicit manual
 runs use this runner; pull request CI uses GitHub-hosted runners.
 
 This APK-only workflow does not generate the full upstream website/Windows

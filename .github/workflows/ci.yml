@@ -117,6 +117,8 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
       - name: Android NDK and platform
         run: sdkmanager "ndk;27.3.13750724" "platforms;android-35" "build-tools;35.0.0"
       - uses: msys2/setup-msys2@v2

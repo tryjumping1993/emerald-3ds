@@ -14,7 +14,7 @@ if ($env:EXPECTED_CERT_SHA256 -notmatch '^[0-9a-fA-F]{64}$') {
 $env:PYTHONUNBUFFERED = '1'
 $ndkBin = Join-Path $env:ANDROID_HOME 'ndk/27.3.13750724/prebuilt/windows-x86_64/bin'
 $env:PATH = "$env:MSYS2_ROOT/ucrt64/bin;$env:MSYS2_ROOT/usr/bin;$ndkBin;$env:PATH"
-$python = (Get-Command python).Source
+$python = if ($env:EMERALD_PYTHON) { $env:EMERALD_PYTHON } else { (Get-Command python).Source }
 $make = Join-Path $ndkBin 'make.exe'
 $commit = git rev-parse HEAD
 if ($LASTEXITCODE) { throw 'Cannot identify the checked-out commit.' }
@@ -22,6 +22,7 @@ $version = if ($env:RELEASE_TAG) { $env:RELEASE_TAG } else { '0.4.0-ci' }
 # Validate before any expensive work; manual runs build an artifact without creating a release.
 Invoke-Checked $python @('-c', 'from tools.thor_dev import release_version; import sys; print(release_version(sys.argv[1]))', $version)
 Invoke-Checked $python @('-m', 'pip', 'install', 'Pillow')
+Invoke-Checked $python @('-m', 'unittest', 'discover', '-s', 'tools/tests', '-v')
 Invoke-Checked $python @('tools/bootstrap.py')
 Invoke-Checked $make @('-C', 'build/upstream', '-j16', 'tools', 'generated', "PYTHON=$python")
 Invoke-Checked $python @('3ds_port/tests/voxel_seam_test.py', '--cc', 'gcc')
