@@ -3,6 +3,48 @@
 A release is a set of assets attached to a GitHub release. None of them ever
 contains a ROM, a data pack or anything extracted from the game.
 
+## Fork: automatic Thor APK releases
+
+In `tryjumping1993/emerald-3ds`, pushing a tag such as `v0.4.1` runs
+`.github/workflows/release.yml` on this PC's dedicated
+`JAKESPC4090-Emerald3DS` runner (`self-hosted`, `Windows`, `X64`,
+`emerald-thor-release`). Like PaperBoat, the runner starts at Windows sign-in;
+the PC must be awake and the maintainer signed in. PaperBoat keeps its own
+runner and work directory.
+
+The workflow checks out the tag, bootstraps the pinned game sources and
+patches, runs focused terrain/gameplay checks, builds a signed release APK,
+verifies its signing certificate, and runs the publication audits. It creates
+a **draft GitHub release** containing only `Emerald3DS-Thor.apk` and
+`SHA256SUMS.txt`, with GitHub-generated release notes. Review the notes and
+publish the draft from the fork's Releases page. Prerelease tags such as
+`v0.4.1-beta.1` mark the draft as a prerelease. Existing releases are never
+overwritten by a rerun.
+
+```sh
+git tag -a v0.4.1 -m "Thor 0.4.1"
+git push origin v0.4.1
+```
+
+The tag sets the native version and Android version name/code. Minor versions
+must be at most 99 and patch versions at most 999. Prereleases sort below
+their final release; successive prereleases of the same version share a code.
+Use a new patch version for published upgrades. A manual **Run workflow**
+builds a signed verification artifact without creating a release.
+
+The runner needs the Android SDK/NDK, JDK, MSYS2 UCRT64 tools, Python/Pillow,
+Git, GitHub CLI, and the maintainer-local signing configuration described in
+[THOR_BUILD.md](THOR_BUILD.md). Set repository variable
+`ANDROID_SIGNING_CERT_SHA256` to the existing Thor release certificate's
+SHA-256 fingerprint. The private signing file and keystore stay outside the
+checkout. The startup task supplies `ANDROID_HOME`, `JAVA_HOME`,
+`MSYS2_ROOT` and an isolated Gradle cache. Only tag pushes and explicit manual
+runs use this runner; pull request CI uses GitHub-hosted runners.
+
+This APK-only workflow does not generate the full upstream website/Windows
+builder release below. Players still need a matching privately generated data
+pack; ROMs, data packs and signing keys are never uploaded.
+
 | Asset | For |
 |---|---|
 | `Emerald3DS-vX.Y.Z-Windows.zip` | the Windows builder: builder, engine-only 3DSX, recipe, `README.txt`, `LICENSES/` |

@@ -9,6 +9,9 @@
 #include "3ds_extras.h"
 #include "3ds_platform.h"
 #include "3ds_daynight.h"
+#include "3ds_mods.h"
+#include "data.h"
+#include "script_pokemon_util.h"
 #include "event_data.h"
 #include "pokedex.h"
 #include "pokemon.h"
@@ -30,6 +33,41 @@ static const char *const sTimedEncounters[] = {CTR_TEXT("ORIGINAL", "ORIGINAL", 
 static const char *const sVisibleWild[] = {CTR_TEXT("OFF", "NO", "NON", "NO"), CTR_TEXT("FEW", "POCOS", "PEU", "POCHE"), CTR_TEXT("SOME", "ALGUNOS", "MOYEN", "ALCUNE"), CTR_TEXT("MANY", "MUCHOS", "BEAUCOUP", "MOLTE")};
 static const char *const sEncounterRate[] = {CTR_TEXT("NORMAL", "NORMAL", "NORMAL", "NORMALE"), CTR_TEXT("OFF", "NO", "NON", "NO"), "1/4", "1/2", "2X"};
 static const char *const sShinyOdds[] = {"1/8192", "1/4096", "1/1024", "1/256", "1/64", CTR_TEXT("ALWAYS", "SIEMPRE", "TOUJOURS", "SEMPRE")};
+static const char *const sLevelCaps[] = {"100", "125", "150", "200"};
+static const char *const sExpMultipliers[] = {"1X", "2X", "4X", "8X"};
+static const char *const sLegendaryRates[] = {"OFF", "1%", "5%", "10%", "100%"};
+static const char *const sStarterSteps[] = {"1", "10", "50"};
+static const u8 sOriginalStarter[] = {CHAR_O, CHAR_R, CHAR_I, CHAR_G, CHAR_I, CHAR_N, CHAR_A, CHAR_L, EOS};
+
+unsigned CtrExtras_LevelCap(void) { return CtrMods_LevelCap(CtrExtras_Get("level_cap")); }
+unsigned CtrExtras_StarterDex(void)
+{
+    int dex = CtrSettings_GetInt("starter_dex", 0);
+    return dex > 0 && dex <= NATIONAL_DEX_COUNT ? (unsigned)dex : 0;
+}
+
+static void ModsOpen(void) { CtrExtras_ShowScreen(CTR_EXTRAS_CHEATS, 2); }
+static void ModsBack(void) { CtrExtras_ShowScreen(CTR_EXTRAS_CHEATS, 0); }
+static void HealPartyNow(void) { HealPlayerParty(); PlaySE(SE_SUCCESS); }
+
+static void StarterStep(int direction)
+{
+    static const int steps[] = {1, 10, 50};
+    int step = CtrSettings_GetInt("starter_step", 0);
+    int dex = CtrSettings_GetInt("starter_dex", 0);
+    if (step < 0 || step >= (int)ARRAY_COUNT(steps)) step = 0;
+    if (dex < 0 || dex > NATIONAL_DEX_COUNT) dex = 0;
+    dex = (dex + (direction < 0 ? -steps[step] : steps[step]) + NATIONAL_DEX_COUNT + 1)
+        % (NATIONAL_DEX_COUNT + 1);
+    CtrSettings_SetInt("starter_dex", dex);
+}
+
+static const u8 *StarterText(void)
+{
+    int dex = CtrSettings_GetInt("starter_dex", 0);
+    return dex > 0 && dex <= NATIONAL_DEX_COUNT
+         ? gSpeciesNames[NationalPokedexNumToSpecies(dex)] : sOriginalStarter;
+}
 /* The voxel world per eye with the 3D slider (3ds_video.c): AUTO is on a
  * New 3DS only (the second pass costs an Old 3DS the frame), and how deep
  * the slider's full travel goes, in percent of the renderer's depth. Read
@@ -230,6 +268,15 @@ const CtrExtra gCtrExtras[] =
     {CTR_EXTRAS_CHEATS, CTR_TEXT("NATIONAL DEX ON", "DEX NACIONAL ACT.", "DEX NAT. ACTIF", "DEX NAZ. ATTIVO"), "dex_national_on", 0, 0, sDexDone, UnlockNationalDex, NULL, NULL},
     {CTR_EXTRAS_CHEATS, CTR_TEXT("NATIONAL DEX FULL", "DEX NACIONAL LLENA", "DEX NAT. PLEIN", "DEX NAZ. PIENO"), "dex_national", 0, 0, sDexDone, CompleteNationalDex, NULL, NULL},
     {CTR_EXTRAS_CHEATS, CTR_TEXT("GIVE ITEMS", "DAR OBJETOS", "DONNER OBJETS", "DAI OGGETTI"), "give_open", 0, 0, sGiveOpenText, GiveOpen, NULL, NULL},
+    {CTR_EXTRAS_CHEATS, CTR_TEXT("GAMEPLAY MODS", "MODS DE JUEGO", "MODS DE JEU", "MOD DI GIOCO"), "mods_open", 0, 0, sGiveOpenText, ModsOpen, NULL, NULL},
+    {CTR_EXTRAS_SCREEN(CTR_EXTRAS_CHEATS, 2), CTR_TEXT("BACK TO CHEATS", "VOLVER A TRUCOS", "RETOUR", "INDIETRO"), "mods_back", 0, 0, sGiveBackText, ModsBack, NULL, NULL},
+    {CTR_EXTRAS_SCREEN(CTR_EXTRAS_CHEATS, 2), CTR_TEXT("LEVEL CAP", "NIVEL MÁXIMO", "NIVEAU MAX.", "LIVELLO MAX"), "level_cap", 4, 0, sLevelCaps, NULL, NULL, NULL},
+    {CTR_EXTRAS_SCREEN(CTR_EXTRAS_CHEATS, 2), CTR_TEXT("EXP MULTIPLIER", "MULTIPLICADOR EXP", "MULTIPLICATEUR EXP", "MOLTIPLICATORE ESP"), "exp_multiplier", 4, 0, sExpMultipliers, NULL, NULL, NULL},
+    {CTR_EXTRAS_SCREEN(CTR_EXTRAS_CHEATS, 2), CTR_TEXT("LEFT STARTER", "INICIAL IZQUIERDO", "STARTER GAUCHE", "STARTER SINISTRO"), "starter_dex", 0, 0, NULL, NULL, StarterStep, StarterText},
+    {CTR_EXTRAS_SCREEN(CTR_EXTRAS_CHEATS, 2), CTR_TEXT("STARTER STEP", "PASO DEL INICIAL", "PAS DU STARTER", "PASSO STARTER"), "starter_step", 3, 0, sStarterSteps, NULL, NULL, NULL},
+    {CTR_EXTRAS_SCREEN(CTR_EXTRAS_CHEATS, 2), CTR_TEXT("WILD LEGENDARIES", "LEGENDARIOS SALV.", "LÉGENDAIRES SAUV.", "LEGGENDARI SELV."), "wild_legendaries", 5, 0, sLegendaryRates, NULL, NULL, NULL},
+    {CTR_EXTRAS_SCREEN(CTR_EXTRAS_CHEATS, 2), CTR_TEXT("PERFECT WILD IVS", "IV SALVAJES MÁX.", "IV SAUV. PARFAITS", "IV SELV. PERFETTI"), "perfect_wild", 2, 0, gCtrExtrasOffOn, NULL, NULL, NULL},
+    {CTR_EXTRAS_SCREEN(CTR_EXTRAS_CHEATS, 2), CTR_TEXT("HEAL PARTY", "CURAR EQUIPO", "SOIGNER ÉQUIPE", "CURA SQUADRA"), "heal_party", 0, 0, sDexDone, HealPartyNow, NULL, NULL},
     {CTR_EXTRAS_SCREEN(CTR_EXTRAS_CHEATS, 1), CTR_TEXT("GIVE ITEMS", "DAR OBJETOS", "DONNER OBJETS", "DAI OGGETTI"), "give_back", 0, 0, sGiveBackText, GiveBack, NULL, NULL},
     {CTR_EXTRAS_SCREEN(CTR_EXTRAS_CHEATS, 1), CTR_TEXT("POCKET", "BOLSILLO", "POCHE", "TASCA"), "give_pocket", 5, 0, sGivePockets, NULL, NULL, NULL},
     {CTR_EXTRAS_SCREEN(CTR_EXTRAS_CHEATS, 1), CTR_TEXT("ITEM", "OBJETO", "OBJET", "OGGETTO"), "give_item", 0, 0, NULL, NULL, GiveItemStep, GiveItemText},

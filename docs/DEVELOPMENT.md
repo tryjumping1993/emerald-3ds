@@ -91,9 +91,21 @@ required). Add `--assets build/upstream/3ds_port/romfs/voxel/buildings.bin`
 to check generated pages as well, or run `verify-night-windows` in that tree.
 See [day/night validation](DAY_NIGHT.md) for the hardware acceptance checklist.
 
+`python3 3ds_port/tests/voxel_seam_test.py --cc gcc` checks the runtime's
+raised and lowered border edges, sea steps between maps, and differing edge
+depths and slopes. `python3 3ds_port/tests/voxel_terrace_foot_test.py` checks
+that cut rock above a lower terrace puts its background at that terrace's
+height. Both use synthetic fixtures and run in CI without a ROM.
+Issue #137's affected views are Route 114 (21,76), (7,76), and (7,36),
+Route 115 (35,44) and its sea seam at (7,76), and Route 117 (49,4).
+Rebuild `voxel/relief.bin` for the terrace-foot correction. For visual checks,
+keep the camera target at the player's map position: the preview scanner's
+default camera adds the relief height to its target Z, unlike the game.
+
 `make verify` builds and runs the C host tests (input decoding, video decode,
 pack parser, voxel world hashing, arena, atlas, trees, lighting, ground mesh,
-signposts, relief) and audits the link. The builder's tests:
+signposts, relief) and audits the link. See [optional gameplay mods](GAMEPLAY_MODS.md)
+for the new options and their rule and production-hook tests. The builder's tests:
 
 ```
 python -m unittest discover -s builder/tests

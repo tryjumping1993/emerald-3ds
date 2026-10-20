@@ -2,6 +2,14 @@
 
 ## Unreleased — AYN Thor
 
+- Closed terrace faces above trees on Routes 114, 115 and 117, Route 114's
+  terrace slits, and the Route 115 / Rustboro sea seam.
+- Optional gameplay mods: level caps of 100/125/150/200, any of the 386
+  Pokédex entries as the left starter, legendary encounters gated by average
+  party level, faster XP, perfect wild IVs, and party healing.
+- Tag-triggered, signed Thor APK builds on the maintainer's Windows runner,
+  with checksums and automatically generated draft release notes.
+
 - Native Android dual-screen port: GLES voxel overworld and battles at 4x
   resolution, AAudio, touch controls and 120 Hz output with half-tick motion.
 - Fixed indexed voxel models drawing giant black polygons over the northeast

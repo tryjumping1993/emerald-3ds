@@ -57,7 +57,7 @@ static int sSpeed = 0;
  * 3ds_extras.c): "key=number" lines kept as read and written back with the
  * rest. A key no build knows yet survives in the file too.
  */
-#define EXTRA_KEYS 48
+#define EXTRA_KEYS 64
 static struct { char key[24]; int value; } sExtra[EXTRA_KEYS];
 static int sExtraCount;
 

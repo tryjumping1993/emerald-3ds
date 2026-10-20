@@ -19,6 +19,8 @@ jobs:
         run: python -m compileall -q builder tools 3ds_port/scripts 3ds_port/tests
       - name: Builder tests (synthetic data, no ROM)
         run: python -m unittest discover -s builder/tests -v
+      - name: Thor release tag versioning
+        run: python -m unittest discover -s tools/tests -v
       - name: Synthetic web payload passes the release contract audit
         run: |
           python tools/build_web_payload.py --synthetic synthetic-web
@@ -46,10 +48,16 @@ jobs:
         run: |
           python android_port/tests/gles_draw_test.py --cc gcc
           python android_port/tests/shim_lock_test.py --cc gcc
+      - name: Optional gameplay mod rules
+        run: |
+          gcc -std=c99 -O2 -Wall -Wextra -Werror -I3ds_port/include 3ds_port/tests/gameplay_mods_test.c 3ds_port/src/3ds_mods.c -o gameplay_mods_test
+          ./gameplay_mods_test
       - name: Day/night clock and lighting
         run: make -C 3ds_port verify-daynight verify-clock-store verify-encounters verify-night-lamps
       - name: Standalone voxel shadows and mesh fixtures
         run: |
+          python 3ds_port/tests/voxel_seam_test.py --cc gcc
+          python 3ds_port/tests/voxel_terrace_foot_test.py
           make -C 3ds_port verify-voxel-lighting verify-voxel-trees build/voxel_ground_mesh_test.exe
           cd 3ds_port
           ./build/voxel_ground_mesh_test.exe
@@ -78,6 +86,8 @@ jobs:
         run: make -C build/upstream/3ds_port verify PYTHON=python3
       - name: Production timed encounter rules
         run: python3 3ds_port/tests/encounter_tables_test.py --tree build/upstream
+      - name: Production gameplay mod hooks
+        run: python3 3ds_port/tests/gameplay_hooks_test.py --tree build/upstream
       - name: Production berry clock integration
         run: python3 3ds_port/tests/berry_clock_test.py --tree build/upstream
       - name: Engine-only 3DSX

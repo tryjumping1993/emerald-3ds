@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -17,6 +18,21 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "com.emerald3ds.thor"
+
+
+def release_version(value: str) -> tuple[str, int]:
+    """Use the tag as the display version and reserve 100 codes per patch."""
+    match = re.fullmatch(r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?", value)
+    if not match:
+        raise argparse.ArgumentTypeError("Expected vMAJOR.MINOR.PATCH[-prerelease].")
+    major, minor, patch = map(int, match.group(1, 2, 3))
+    code = major * 10000000 + minor * 100000 + patch * 100 + 99
+    if minor > 99 or patch > 999 or code > 2100000000:
+        raise argparse.ArgumentTypeError("Android version needs minor <= 99, patch <= 999 and code <= 2100000000.")
+    # Prerelease tags have a lower code than the corresponding final release.
+    if match.group(4):
+        code -= 99
+    return value.removeprefix("v"), code
 
 
 def run(cmd, **kwargs):
@@ -68,6 +84,12 @@ def build(args, env: dict, ndk: Path) -> Path:
                  "NDK=" + ndk.as_posix(), "MSYS_BIN=" + (args.msys.resolve() / "ucrt64/bin").as_posix(),
                  "PYTHON=" + Path(sys.executable).as_posix(), "VOXEL=1", "EMBED_DATA=0",
                  "MEASURE_AID=" + ("1" if args.measure else "0"), "apk-files", "pak"]
+    if args.skip_pack:
+        make_args.remove("pak")
+    if args.version:
+        make_args.append("APP_VERSION=" + args.version[0])
+    if args.commit:
+        make_args.append("PORT_COMMIT=" + args.commit)
     if args.release and args.measure:
         raise SystemExit("Measurement hooks cannot be enabled in a release.")
     if args.release:
@@ -84,8 +106,11 @@ def build(args, env: dict, ndk: Path) -> Path:
         shutil.rmtree(assets)
     shutil.copytree(output / "romfs", assets / "romfs")
     gradle = ROOT / "android_port" / "gradlew.bat"
-    run([gradle, "assembleRelease" if args.release else "assembleDebug",
-         "-Pemerald3dsLib=" + (output / "lib").as_posix(), "-Pemerald3dsAssets=" + assets.as_posix()],
+    gradle_args = [gradle, "assembleRelease" if args.release else "assembleDebug",
+                   "-Pemerald3dsLib=" + (output / "lib").as_posix(), "-Pemerald3dsAssets=" + assets.as_posix()]
+    if args.version:
+        gradle_args += ["-PthorVersionName=" + args.version[0], "-PthorVersionCode=" + str(args.version[1])]
+    run(gradle_args,
         cwd=ROOT / "android_port", env=env)
     kind = "release" if args.release else "debug"
     apk = ROOT / "android_port/app/build/outputs/apk" / kind / ("app-%s.apk" % kind)
@@ -107,10 +132,17 @@ def main():
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     parser.add_argument("--measure", action="store_true", help="enable measure.txt warp/battle hooks (development only)")
     parser.add_argument("--release", action="store_true", help="production signing from THOR_* environment variables")
+    parser.add_argument("--version", type=release_version, help="release tag, also sets the Android version code")
+    parser.add_argument("--commit", help="port commit recorded in the native build log")
+    parser.add_argument("--skip-pack", action="store_true", help="build only the engine APK, without a local data pack")
     parser.add_argument("--continue-save", action="store_true", help="run: send Start/A to reach Continue")
     parser.add_argument("--display", help="shot: physical display id from adb shell dumpsys SurfaceFlinger --display-id")
     parser.add_argument("--out", type=Path, default=ROOT / "build/thor-shot.png")
     args = parser.parse_args()
+    if args.action == "deploy" and args.skip_pack:
+        parser.error("deploy requires its matching data pack")
+    if args.commit and not re.fullmatch(r"[0-9a-fA-F]{7,40}", args.commit):
+        parser.error("--commit must be a Git commit hash")
     if args.action == "sync":
         sync(args.tree.resolve())
         return

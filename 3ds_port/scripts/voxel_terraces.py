@@ -2760,8 +2760,11 @@ def records(sol):
             mask = [(a | b) for a, b in zip(mask or [0] * 16, low)]
             foot = min(min(r) for r in g)
         if mask and any(mask):
+            # A cut flank can end above a lower terrace top as well as open
+            # ground. Leaving TOP out stood its background a level too high:
+            # Route 114's steps at the water opened slits behind their feet.
             grounds = [sol["flat"][n] for n in ((x, y - 1), (x - 1, y), (x + 1, y), (x, y + 1))
-                       if n in sol["flat"] and c.kind.get(n) in (GROUND, UNKNOWN)]
+                       if n in sol["flat"] and c.kind.get(n) in (GROUND, TOP, UNKNOWN)]
             if foot is None:
                 foot = min(grounds) if grounds else min(min(r) for r in g)
             elif grounds:
