@@ -16,6 +16,16 @@ $ndkBin = Join-Path $env:ANDROID_HOME 'ndk/27.3.13750724/prebuilt/windows-x86_64
 $env:PATH = "$env:MSYS2_ROOT/ucrt64/bin;$env:MSYS2_ROOT/usr/bin;$ndkBin;$env:PATH"
 $python = if ($env:EMERALD_PYTHON) { $env:EMERALD_PYTHON } else { (Get-Command python).Source }
 $make = Join-Path $ndkBin 'make.exe'
+# Non-NTFS work drives do not report ownership. Trust only this checkout and
+# its generated upstream tree, for this process and its children (not globally).
+$configCount = if ($env:GIT_CONFIG_COUNT) { [int]$env:GIT_CONFIG_COUNT } else { 0 }
+foreach ($relative in '.', 'build/upstream') {
+    $safePath = [IO.Path]::GetFullPath((Join-Path $PWD $relative)).Replace('\', '/')
+    [Environment]::SetEnvironmentVariable("GIT_CONFIG_KEY_$configCount", 'safe.directory')
+    [Environment]::SetEnvironmentVariable("GIT_CONFIG_VALUE_$configCount", $safePath)
+    $configCount++
+}
+$env:GIT_CONFIG_COUNT = "$configCount"
 $commit = git rev-parse HEAD
 if ($LASTEXITCODE) { throw 'Cannot identify the checked-out commit.' }
 $version = if ($env:RELEASE_TAG) { $env:RELEASE_TAG } else { '0.4.0-ci' }
