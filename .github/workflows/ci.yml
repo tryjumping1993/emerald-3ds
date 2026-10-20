@@ -146,6 +146,14 @@ jobs:
           make -C build/upstream -j4 tools PYTHON=python
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           make -C build/upstream -j4 generated PYTHON=python
+      - name: Android save and interpolation regressions
+        shell: pwsh
+        run: |
+          $env:PATH = '${{ steps.msys.outputs.msys2-location }}/ucrt64/bin;' + $env:PATH
+          python android_port/tests/save_storage_test.py --cc gcc
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python android_port/tests/interpolation_test.py --cc gcc
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Build engine-only APK
         shell: pwsh
         run: |

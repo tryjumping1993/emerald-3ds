@@ -21,6 +21,7 @@
 static bool sInBattle;
 
 #ifdef PLATFORM_ANDROID
+#include "android_host.h"
 /*
  * Nothing on the Thor has to be kept in step with the console's GPU: no GX command queue
  * whose room the uploads are budgeted against, no linear heap or VRAM to flush or clear,
@@ -10593,6 +10594,10 @@ static const char *const sFpsGlyphs[] =
  * With real-time pacing (3ds_platform.c) the two differ on a slow frame. */
 static float sGameFps;
 static uint64_t sGameFpsMark;
+#ifdef PLATFORM_ANDROID
+static float sOutputFps;
+static uint64_t sOutputFpsMark;
+#endif
 
 /*
  * The field's poison step (fldeff_misc.c, Task_FieldPoisonEffect) is a mosaic
@@ -10656,6 +10661,9 @@ static void DrawPoisonVeil(C3D_RenderTarget *target, unsigned alpha)
 static void DrawFps(C3D_RenderTarget *target)
 {
     unsigned fps = (unsigned)(sStats.fps + 0.5f), game = (unsigned)(sGameFps + 0.5f);
+#ifdef PLATFORM_ANDROID
+    fps = (unsigned)(sOutputFps + 0.5f);
+#endif
     unsigned glyphs[12], count = 0;
     char digits[8];
     int length = snprintf(digits, sizeof(digits), "%u/%u", fps > 999 ? 999 : fps, game > 999 ? 999 : game);
@@ -11351,6 +11359,11 @@ void CtrVideo_Present(void)
         sStats.fps = sFpsFrames * 1000.0f / (now - sFpsStart);
         sGameFps = (gameFrames - sGameFpsMark) * 1000.0f / (now - sFpsStart);
         sGameFpsMark = gameFrames;
+#ifdef PLATFORM_ANDROID
+        uint64_t outputFrames = AndroidHost_PresentedFrames();
+        sOutputFps = (outputFrames - sOutputFpsMark) * 1000.0f / (now - sFpsStart);
+        sOutputFpsMark = outputFrames;
+#endif
         sFpsStart = now;
         sFpsFrames = 0;
     }

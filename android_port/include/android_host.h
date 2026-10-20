@@ -72,6 +72,8 @@ void AndroidHost_GlMakeCurrent(void);
  * refresh rate asked of the system for the top surface (60 or 120), what the player's refresh_hz setting says.
  */
 unsigned AndroidHost_PresentsPerTick(void);
+/* Successful top-surface swaps, including interpolated pictures (engine thread only). */
+uint64_t AndroidHost_PresentedFrames(void);
 void AndroidHost_SetRefreshHint(int hz);
 bool AndroidHost_TopBegin(int *width, int *height);
 void AndroidHost_TopEnd(void);

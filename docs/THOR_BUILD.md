@@ -130,6 +130,8 @@ and updates.
 ```text
 python -m unittest discover -s builder/tests -v
 python android_port/tests/gles_draw_test.py --cc gcc
+python android_port/tests/save_storage_test.py --cc gcc
+python android_port/tests/interpolation_test.py --cc gcc
 ```
 
 Run the existing voxel host `verify-*` targets against the staged tree.

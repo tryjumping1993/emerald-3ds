@@ -621,14 +621,24 @@ void AndroidHost_SetRefreshHint(int hz)
     callBridge(g.requestRefresh, hz == 60 ? "60" : "120");
 }
 
+static uint64_t sPresentedFrames;
+
+uint64_t AndroidHost_PresentedFrames(void) { return sPresentedFrames; }
+
 void AndroidHost_TopEnd(void)
 {
     static int64_t nextFallback;
     Screen *s = &s_screen[SCREEN_TOP];
-    if (s->surface != EGL_NO_SURFACE && !eglSwapBuffers(s_display, s->surface))
-        surfaceFailed(SCREEN_TOP, eglGetError());
-    else
-        noteSwap();
+    if (s->surface != EGL_NO_SURFACE)
+    {
+        if (!eglSwapBuffers(s_display, s->surface))
+            surfaceFailed(SCREEN_TOP, eglGetError());
+        else
+        {
+            ++sPresentedFrames;
+            noteSwap();
+        }
+    }
     /* A panel that refuses the 60 Hz request must not run game logic at 90/144 ticks a second. */
     if (s_forceSixty)
     {

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.1 — 2026-10-20 (Thor test build)
+
+- Android saving selects a file-backed flash driver directly instead of
+  probing cartridge hardware tables. Sector writes are flushed to storage;
+  the existing 128 KiB save, rotating slots and emulator RTC trailer are kept.
+- Added INTERPOLATION under OPTION → ENHANCEMENTS (second page), enabled
+  by default. At 120 Hz, voxel camera and sprite positions interpolate between
+  completed game frames without advancing gameplay or predicting future motion.
+  SPEED remains a separate control. Scene changes reset interpolation.
+- The FPS counter now counts actual top-screen presents separately from game
+  ticks, so normal-speed 120 Hz output reads approximately 120/60.
+- Host regressions cover Android save writes/reloads and render interpolation.
+  Thor hardware verification is pending; no device was connected for this build.
+
 ## Unreleased — AYN Thor
 
 - Closed terrace faces above trees on Routes 114, 115 and 117, Route 114's

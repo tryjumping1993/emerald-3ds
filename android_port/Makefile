@@ -118,7 +118,7 @@ native-objs: $(NATIVE_OBJS)
 
 # ── The shared library ────────────────────────────────────────────────────────
 # Wrapped C library calls: the 3DS's file system paths (android_paths.c) and exit (android_main.c).
-LDFLAGS += $(foreach f,fopen rename remove mkdir stat exit,-Wl,--wrap=$(f))
+LDFLAGS += $(foreach f,fopen rename remove mkdir stat exit IdentifyFlash,-Wl,--wrap=$(f))
 LDFLAGS += -Wl,--undefined=__ctr_script_keep
 SO_LIBS := -llog -landroid -laaudio -lEGL -lGLESv3 -lm
 SO_OBJECTS := $(GAME_UNITS) $(NATIVE_OBJS) build/linkid.o build/buildinfo.o

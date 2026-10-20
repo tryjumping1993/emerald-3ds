@@ -7646,8 +7646,8 @@ static void DrawStatics(const C3D_Mtx *view, const VoxelLight *dapples, bool glo
 
 #ifdef PLATFORM_ANDROID
 /*
- * Extra pictures (c3d_gles.c, C3D_ExtraFrame): the panel shows the frame again a part of a tick on, with the
- * camera and the moving billboards carried on by what they moved in the tick before. Only what moves is
+ * Extra pictures (c3d_gles.c, C3D_ExtraFrame): the camera and moving billboards
+ * interpolate between the previous and current completed ticks. Only what moves is
  * kept: the camera, and the vertices of the billboards, their shadows and reflections (the chunks and the
  * lamps stand still).
  */
@@ -7657,6 +7657,8 @@ static VoxelGpuVertex sDynLast[VOXEL_DYNAMIC_VERTICES], sDynBefore[VOXEL_DYNAMIC
 static unsigned sDynCount[3], sDynCountBefore[3];
 static int sDynOriginX[2], sDynOriginZ[2];
 static bool sDynBeforeValid;
+static int sReplayMapGroup = -1, sReplayMapNum = -1;
+static bool sReplayBattle;
 static const VoxelGpuVertex *sDynBound;
 static unsigned sCarried, sReplays;
 static float sCarriedMove;
@@ -7676,12 +7678,17 @@ static void DynRanges(unsigned first[3], unsigned count[3])
 #endif
 }
 
-/* This tick's picture is being drawn: what moved since the last one is what the extra picture carries on. */
+/* Capture completed simulation states before either display picture is drawn. */
 static void ReplayNote(void)
 {
     unsigned first[3], count[3];
 
-    sDynBeforeValid = sCameraFrame + 1u == sFrame;
+    sDynBeforeValid = sCameraFrame + 1u == sFrame
+                  && sReplayMapGroup == sMeshMapGroup && sReplayMapNum == sMeshMapNum
+                  && sReplayBattle == sBattle.on;
+    sReplayMapGroup = sMeshMapGroup;
+    sReplayMapNum = sMeshMapNum;
+    sReplayBattle = sBattle.on;
     sCameraBefore = sCameraFrame + 1u == sFrame ? sCameraLast : sCamera;
     sCameraLast = sCamera;
     sCameraFrame = sFrame;
@@ -7699,15 +7706,15 @@ static void ReplayNote(void)
     sDynOriginZ[1] = sDynamicZ;
 }
 
-static float Carry(float last, float before, float alpha, float limit)
+static float InterpolatePosition(float last, float before, float alpha, float limit)
 {
     float d = last - before;
 
-    return d > limit || d < -limit ? last : last + d * alpha;
+    return d > limit || d < -limit ? last : before + d * alpha;
 }
 
-/* The camera and the billboards as `alpha` of a tick on; false when nothing is to be carried on. */
-static bool ReplayCarry(float alpha)
+/* alpha=0 is the previous tick, 0.5 the midpoint, 1 the current tick. */
+static bool ReplayInterpolate(float alpha)
 {
     unsigned first[3], count[3];
 
@@ -7715,12 +7722,12 @@ static bool ReplayCarry(float alpha)
         return false;
     sCarried++;
     sCarriedMove += fabsf(sCameraLast.x - sCameraBefore.x) + fabsf(sCameraLast.z - sCameraBefore.z);
-    sCamera.x = Carry(sCameraLast.x, sCameraBefore.x, alpha, 2.5f);
-    sCamera.y = Carry(sCameraLast.y, sCameraBefore.y, alpha, 2.5f);
-    sCamera.z = Carry(sCameraLast.z, sCameraBefore.z, alpha, 2.5f);
-    sCamera.targetX = Carry(sCameraLast.targetX, sCameraBefore.targetX, alpha, 2.5f);
-    sCamera.targetY = Carry(sCameraLast.targetY, sCameraBefore.targetY, alpha, 2.5f);
-    sCamera.targetZ = Carry(sCameraLast.targetZ, sCameraBefore.targetZ, alpha, 2.5f);
+    sCamera.x = InterpolatePosition(sCameraLast.x, sCameraBefore.x, alpha, 2.5f);
+    sCamera.y = InterpolatePosition(sCameraLast.y, sCameraBefore.y, alpha, 2.5f);
+    sCamera.z = InterpolatePosition(sCameraLast.z, sCameraBefore.z, alpha, 2.5f);
+    sCamera.targetX = InterpolatePosition(sCameraLast.targetX, sCameraBefore.targetX, alpha, 2.5f);
+    sCamera.targetY = InterpolatePosition(sCameraLast.targetY, sCameraBefore.targetY, alpha, 2.5f);
+    sCamera.targetZ = InterpolatePosition(sCameraLast.targetZ, sCameraBefore.targetZ, alpha, 2.5f);
     DynRanges(first, count);
     memcpy(sDynView, sDynLast, sizeof(sDynView));
     for (int range = 0; range < 3; ++range)
@@ -7738,11 +7745,12 @@ static bool ReplayCarry(float alpha)
                   dz = (float)last->z - ((float)before->z + shiftZ);
 
             /* A sprite that appeared, left, or took another place in the list is not carried. */
-            if (dx > 768.0f || dx < -768.0f || dy > 768.0f || dy < -768.0f || dz > 768.0f || dz < -768.0f)
+            if (last->u != before->u || last->v != before->v
+                || dx > 768.0f || dx < -768.0f || dy > 768.0f || dy < -768.0f || dz > 768.0f || dz < -768.0f)
                 continue;
-            out->x = (int16_t)lroundf((float)last->x + dx * alpha);
-            out->y = (int16_t)lroundf((float)last->y + dy * alpha);
-            out->z = (int16_t)lroundf((float)last->z + dz * alpha);
+            out->x = (int16_t)lroundf((float)last->x + dx * (alpha - 1.0f));
+            out->y = (int16_t)lroundf((float)last->y + dy * (alpha - 1.0f));
+            out->z = (int16_t)lroundf((float)last->z + dz * (alpha - 1.0f));
         }
     }
     sDynBound = sDynView;
@@ -7753,21 +7761,27 @@ static bool ReplayCarry(float alpha)
 #ifdef PLATFORM_ANDROID
 static void DrawWorldBody(C3D_RenderTarget *target, int eye);
 
-/* The world as it is at the tick, or (alpha above 0) a part of a tick on. */
+/* Present between two completed simulation states, one tick behind the
+ * simulation. No future positions are predicted and no game callback runs
+ * for the extra picture. Menus and fast-forward use the current state. */
 static void DrawWorld(C3D_RenderTarget *target, int eye, float alpha)
 {
     VoxelCamera saved = sCamera;
+    bool interpolate = C3D_ReplayRecording() && CtrSettings_GetInt("interpolation", 1)
+                    && CtrSettings_SpeedHalves() <= 2;
 
     sDynBound = sDynamic;
     if (alpha > 0.0f)
     {
         ++sReplays;
-        if (!ReplayCarry(alpha))
+        if (interpolate && !ReplayInterpolate(alpha))
             sCamera = saved;
     }
     else if (sReady && sDrawCount != 0)
     {
         ReplayNote();
+        if (interpolate)
+            ReplayInterpolate(0.0f);
         if (sFrame % 600u == 0u && sReplays != 0)
         {
             CtrLog_Write(CTR_LOG_VIDEO, "VOXEL extra pictures: %u drawn, %u carried on, the camera moved %.4f tiles a tick on average",

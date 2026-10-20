@@ -10,6 +10,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef PLATFORM_ANDROID
+#include <unistd.h>
+#endif
 
 #include "port_platform.h"
 #include "port_log.h"
@@ -312,6 +315,29 @@ u16 Port_FontProbe_CompareNormalLatinGlyph(u16 glyphId)
 
 static bool sSaveAvailable;
 
+#ifdef PLATFORM_ANDROID
+/* Android has a file, not a cartridge to probe. Keep its driver descriptor
+ * in the backend, outside the game's reloadable data tables. In particular,
+ * never let a failed cartridge ID probe select DefaultFlash's hardware writes.
+ * The original sector and two-phase signature protocol stays in save.c. */
+u16 __wrap_IdentifyFlash(void)
+{
+    static const struct FlashType fileFlash = {
+        131072, {4096, 12, 32, 0}, {3, 1}, {{0xCC, 0xCC}}
+    };
+    static const u16 fileMaxTime[12] = {0};
+    ProgramFlashByte = ProgramFlashByte_DUMMY;
+    ProgramFlashSector = (u16 (*)(u16, u8 *))ProgramFlashSector_DUMMY;
+    EraseFlashChip = EraseFlashChip_DUMMY;
+    EraseFlashSector = EraseFlashSector_DUMMY;
+    WaitForFlashWrite = WaitForFlashWrite_DUMMY;
+    gFlashMaxTime = fileMaxTime;
+    gFlash = &fileFlash;
+    CtrLog_Write(CTR_LOG_FS, "Android file save driver: %s", sSaveAvailable ? "ready" : "unavailable");
+    return sSaveAvailable ? 0 : 1;
+}
+#endif
+
 static void MigrateOldSave(void)
 {
     FILE *probe = fopen(CTR_SAVE_PATH, "rb");
@@ -429,6 +455,10 @@ u16 Port_WriteFlash(u32 offset, const void *data, u32 size)
         ok = fseek(file, (long)offset, SEEK_SET) == 0 && fwrite(data, 1, size, file) == size;
     if (ok)
         ok = fflush(file) == 0;
+#ifdef PLATFORM_ANDROID
+    if (ok)
+        ok = fsync(fileno(file)) == 0;
+#endif
     if (fclose(file) != 0)
         ok = false;
     if (!ok)

@@ -2650,12 +2650,12 @@ void C3D_DrawArrays(GPU_Primitive_t primitive, int first, int size)
 /* ══ Extra presents: the frame as it was drawn, again, for a panel that refreshes faster than the game ticks ══
  *
  * The game ticks at 60 Hz, one compositor frame each. A 120 Hz panel shows two pictures per tick: the
- * frame's own, and a second one that is the same frame with the voxel world drawn a half tick on (its
- * camera and its moving billboards carried forward by what they moved in the tick before), so that a
+ * previous completed state, and a second one halfway to the current state (its
+ * camera and moving billboards interpolated between the two), so that a
  * walk across the world is smooth at the panel's rate. Every draw the compositor issues is recorded as
  * it is made, with the state it was made in, and the second picture issues them again from the point
  * where the voxel world is drawn into its surface; the world itself is not recorded but redrawn through
- * the function it was drawn by (C3D_ReplayWorld), asked for a half tick later. A frame with no voxel world
+ * the function it was drawn by (C3D_ReplayWorld), asked for the midpoint. A frame with no voxel world
  * is shown again as it is. */
 
 typedef struct
@@ -3064,6 +3064,7 @@ void AndroidVideo_PresentExtra(void)
 
     for (unsigned i = 1; i < presents; ++i)
         /* Fast-forward keeps its vsync budget but reuses the finished picture to save a world draw. */
-        C3D_ExtraFrame(CtrSettings_SpeedHalves() > 2 ? 0.0f : (float)i / (float)presents);
+        C3D_ExtraFrame(CtrSettings_SpeedHalves() > 2 || !CtrSettings_GetInt("interpolation", 1)
+                       ? 0.0f : (float)i / (float)presents);
     R.valid = false;
 }

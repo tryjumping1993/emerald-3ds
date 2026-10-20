@@ -1,4 +1,23 @@
-# Thor verification — 2026-10-19
+# Thor verification
+
+## Save and interpolation test build — 2026-10-20
+
+No Thor was connected for this build. Hardware save/restart and visual
+smoothness checks remain pending.
+
+- The actual Android path adapter, file save writer and selected flash driver
+  pass host checks for all 32 sectors, separate signature-byte commits,
+  reloads, mismatch detection, bounds rejection and RTC trailer preservation.
+- The actual voxel render functions pass host checks for previous/midpoint
+  positions, stopping without prediction, unchanged simulation/camera buffers,
+  separate speed and interpolation controls, scene cuts and sprite replacement.
+- Existing GLES draw and shim lock regressions pass. Builder tests: 89 run,
+  2 skipped, no failures. Release version tests: 2 passed.
+
+The test APK requires its matching regenerated pack. Updating with the same
+signing key and importing that pack keeps the existing save and settings.
+
+## Previous verification — 2026-10-19
 
 This records the local verification of the Thor port and its English release
 payload. Build and installation commands are in [THOR_BUILD.md](THOR_BUILD.md)

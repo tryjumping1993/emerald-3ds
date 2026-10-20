@@ -50,9 +50,15 @@ Letterbox bars remain black. If the secondary display disappears, the
 bottom canvas moves below the game on the main display. Sleep and
 backgrounding suspend the engine and audio; held inputs are cleared.
 
-At an actual 120 Hz top-display mode, each game tick gets two pictures,
-with the voxel camera and moving sprites carried halfway forward for the
-second picture. The game still advances at about 60 ticks per second.
+**OPTION → ENHANCEMENTS → second page → INTERPOLATION** is enabled by
+default. At an actual 120 Hz top-display mode, each game tick gets two pictures:
+the previous completed voxel state, then the midpoint toward the current one.
+The voxel camera and moving sprites interpolate without advancing gameplay;
+presentation trails the simulation by one tick (about 17 ms). Map changes,
+battle transitions and large jumps reset the history. Classic 2D scenes and
+menus repeat their picture; they do not gain generated motion frames.
+The game still advances at about 60 ticks per second with **SPEED = 1X**.
+The FPS overlay reports display presents / game ticks (about **120/60**).
 Fast-forward repeats the finished picture on that second refresh to save
 the extra world draw. Panels with other rates are asked for 60 Hz.
 
@@ -82,6 +88,7 @@ voxel=1
 voxel_battle=1
 surface_scale=4
 refresh_hz=120
+interpolation=1
 ```
 
 `surface_scale` accepts 1–4 and defaults to 4. `refresh_hz=60` is a system
