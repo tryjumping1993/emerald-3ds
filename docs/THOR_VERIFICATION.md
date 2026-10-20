@@ -7,8 +7,13 @@ with the APK's Python 3.11/Pillow 9.2 builder and a locally staged clean ROM;
 the ROM and generated pack are never included in an APK or test artifact.
 The release engine remains ARMv7.
 
+- Fresh setup rebuilt all five scenery files and the complete matching pack
+  from the ROM on Android, verified the result, and installed it successfully.
+  The 2 GiB emulator took 717 seconds. Save and settings test files survived;
+  the previous dummy pack was replaced only after validation, and temporary
+  build files were removed.
 - The actual Android upgrade path rebuilt and atomically installed a compatible
-  pack using verified existing scenery in 3.5 seconds. Save and settings test
+  pack using verified existing scenery in 3.7 seconds. Save and settings test
   files were unchanged, and setup's temporary files were removed.
 - Builder tests cover ROM rejection, incompatible recipes, verified scenery
   reuse and fallback, Android file-copy permissions, and consistent terrain
