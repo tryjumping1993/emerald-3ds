@@ -105,6 +105,9 @@ jobs:
 
   build-thor:
     runs-on: windows-latest
+    env:
+      ANDROID_HOME: ${{ runner.temp }}/thor-android-sdk
+      ANDROID_SDK_ROOT: ${{ runner.temp }}/thor-android-sdk
     steps:
       - name: Keep shell scripts in LF format
         run: git config --global core.autocrlf false

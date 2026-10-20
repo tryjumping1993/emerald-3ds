@@ -64,6 +64,7 @@ def tool_environment(args) -> tuple[dict, Path, Path]:
     env["PATH"] = os.pathsep.join(map(str, (Path(sys.executable).parent, msys / "ucrt64" / "bin",
                                           msys / "usr" / "bin", ndk / "prebuilt" / "windows-x86_64" / "bin"))) + os.pathsep + env.get("PATH", "")
     env["ANDROID_HOME"] = str(sdk)
+    env["ANDROID_SDK_ROOT"] = str(sdk)
     env.setdefault("JAVA_HOME", str(Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Android/Android Studio/jbr"))
     env["MSYS_NO_PATHCONV"] = "1"
     return env, sdk, ndk
