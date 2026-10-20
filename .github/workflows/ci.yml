@@ -137,7 +137,9 @@ jobs:
           $env:MSYS2_ROOT = '${{ steps.msys.outputs.msys2-location }}'
           $env:PATH = "$env:MSYS2_ROOT\ucrt64\bin;$env:MSYS2_ROOT\usr\bin;$env:ANDROID_HOME\ndk\27.3.13750724\prebuilt\windows-x86_64\bin;$env:PATH"
           python tools/bootstrap.py
-          make -C build/upstream -j4 tools generated PYTHON=python
+          make -C build/upstream -j4 tools PYTHON=python
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          make -C build/upstream -j4 generated PYTHON=python
       - name: Build engine-only APK
         shell: pwsh
         run: |
