@@ -1,5 +1,25 @@
 # Thor verification
 
+## Prebuilt scenery setup — 2026-10-21
+
+An API 36 x86-64 emulator completed fresh setup using the APK's five bundled
+scenery files in a 13.86-second instrumentation test, including Python startup.
+The previous full-generation test took 717 seconds on this emulator profile.
+This is an emulator measurement, not a Thor timing; the Thor was not visible
+over ADB during this check. The release engine remains ARMv7.
+
+The test replaced both scenery generation and input reconstruction with
+functions that fail if called, provided no usable existing pack, and still
+assembled and installed a fully verified matching pack. Save/settings markers
+survived and the import cache was removed. Host tests also reject wrong ROMs
+and missing/corrupt bundled scenery without replacing the previous output.
+
+All 96 builder tests passed (five environment-dependent skips locally), all
+12 release-tool tests passed, and Android debug unit tests passed. Packaging
+checks require exactly the five matching outputs. Release auditing permits
+those game-derived files only inside the APK after recipe verification;
+other members retain ROM, pack and secret checks.
+
 ## Native startup packaging fix — 2026-10-20
 
 On the connected AYN Thor, the published 0.4.2 APK failed before loading game

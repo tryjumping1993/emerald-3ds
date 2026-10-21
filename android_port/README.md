@@ -6,7 +6,10 @@ The engine backend links against `include/android_host.h`; the host never includ
 ## On-device game setup
 
 Install the release APK, open the app and choose your clean English Emerald
-ROM. Missing/outdated packs trigger setup automatically. The offline builder
+ROM. The APK includes all five prebuilt scenery outputs, including their
+game-derived textures. After validating the exact supported ROM, setup extracts
+the remaining data and assembles a matching pack without running scenery
+generators. Missing/outdated packs trigger setup automatically. The offline builder
 runs in a separate `:builder` process and atomically installs the verified
 pack. A saved document grant can be reused on later updates. Saves/settings
 are kept; a cancelled or interrupted build leaves the previous pack in place.

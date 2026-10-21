@@ -109,12 +109,16 @@ class Progress:
 def build_pack(rom_path: Path, payload: Payload, out_pak: Path, progress=None,
                keep_workdir: bool = False, runner: str = "subprocess", rom: Rom | None = None,
                follower_fetcher: "followers.Fetcher | None | bool" = True,
-               generated_cache: Path | None = None) -> dict:
+               generated_cache: Path | None = None,
+               generated_assets: Path | None = None) -> dict:
     """Generate emerald3ds.pak from the ROM. Returns a summary.
 
     `runner` picks how the voxel generators run (see voxel.py); `rom` lets a
     caller that already holds the checked ROM in memory skip reading it again.
     The summary's `timings` holds (step, seconds) for the slow parts.
+    `generated_assets` supplies bundled scenery, checked against the recipe
+    after the ROM is validated. Invalid bundled data fails without writing a
+    pack; desktop callers can instead use `generated_cache` or run generators.
 
     `follower_fetcher` gets the optional follower sprites (followers.py): True
     for the default one (local copies, the cache, the network), False for
@@ -152,7 +156,22 @@ def build_pack(rom_path: Path, payload: Payload, out_pak: Path, progress=None,
     timings.append(("extract", time.perf_counter() - start))
 
     cached = {}
-    if recipe.generated and generated_cache is not None:
+    if recipe.generated and generated_assets is not None:
+        start = time.perf_counter()
+        try:
+            for item in recipe.generated:
+                source = (generated_assets / item["path"]).resolve()
+                if not source.is_relative_to(generated_assets.resolve()):
+                    raise ValueError("Invalid scenery path")
+                data = source.read_bytes()
+                if len(data) != item["size"] or zlib.crc32(data) & 0xFFFFFFFF != item["crc"]:
+                    raise ValueError("Scenery does not match the recipe: " + item["path"])
+                cached[item["path"]] = data
+        except (OSError, ValueError) as exc:
+            raise BuilderError("This APK's prebuilt scenery is damaged or incompatible.",
+                               "Install the complete APK again.", code="scenery_invalid") from exc
+        timings.append(("prebuilt", time.perf_counter() - start))
+    elif recipe.generated and generated_cache is not None:
         try:
             with pak.PakReader(generated_cache) as previous:
                 for item in recipe.generated:
@@ -164,7 +183,7 @@ def build_pack(rom_path: Path, payload: Payload, out_pak: Path, progress=None,
             cached = {}
     if recipe.generated and len(cached) == len(recipe.generated):
         files.update(cached)
-        report(0.9, "Reusing verified scenery")
+        report(0.9, "Installing prebuilt scenery" if generated_assets is not None else "Reusing verified scenery")
     elif recipe.generated:
         work = Path(tempfile.mkdtemp(prefix="emerald3ds-"))
         try:

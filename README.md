@@ -41,8 +41,9 @@ interface on the bottom screen replaces the START menu. Enable the optional
 **voxel overworld** to explore supported areas from a new angle.
 
 For the **AYN Thor Android port**, install the release APK and select your
-own Emerald ROM directly on the device. The app builds its matching game data
-offline and keeps existing saves across updates. See the
+own Emerald ROM directly on the device. The APK includes prebuilt voxel scenery;
+the app validates your ROM and extracts the remaining game data offline, keeping
+existing saves across updates. See the
 [Thor installation guide](docs/THOR_INSTALLATION.md).
 
 ## Screenshots
@@ -100,7 +101,7 @@ offline and keeps existing saves across updates. See the
 | **Optional day/night lighting** | Morning, daylight, sunset and night outdoors in 2D and voxel mode, lit windows and street lamps, and a clock that can run up to 120X. |
 | **Local wireless play** *(experimental)* | Union Room, trades, battles, Berry Blender, minigames and link contests between 3DS systems nearby. |
 | **Enhancements** | All optional: physical/special split, IVs and EVs on the summary, infinite TMs, running indoors, Repel prompt, visible wild Pokémon, faster speeds and more. |
-| **Built from your own cartridge** | The builder generates the game data locally from your own dump. No ROM content is distributed. |
+| **Built from your own cartridge** | The builder generates game data locally from your own dump. Thor APKs include prebuilt scenery to speed up setup and require a supported ROM. |
 
 ### A new perspective on Hoenn
 
@@ -209,8 +210,10 @@ See the [builder documentation](builder/) for setup and additional commands, and
 
 **This repository contains no game content.** It holds the port's own code,
 the tools that build it and the builder that turns *your own* cartridge dump
-into the game's data pack. Nothing derived from the ROM is distributed here or
-in the releases.
+into the game's data pack. Thor APK releases include five prebuilt scenery
+outputs with game-derived textures, and still require a supported ROM to
+prepare the remaining data. The source repository, desktop and web payloads
+do not include those generated outputs.
 
 | Component | Location | Role |
 | :--- | :--- | :--- |

@@ -1,5 +1,6 @@
 # Gradle / Android Studio outputs and machine-local config
 .gradle/
+.kotlin/
 app/build/
 app/.cxx/
 host_test/build/

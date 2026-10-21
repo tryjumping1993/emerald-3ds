@@ -14,6 +14,7 @@ from emerald3ds_builder import pak
 from emerald3ds_builder.recipe import Recipe
 from emerald3ds_builder.rom import Rom
 from emerald3ds_builder import voxel
+from emerald3ds_builder.build import build_pack, Payload
 
 spec = importlib.util.spec_from_file_location("android_builder", ROOT / "android_port/app/src/main/python/android_builder.py")
 android_builder = importlib.util.module_from_spec(spec)
@@ -121,9 +122,41 @@ class AndroidBuilderTests(unittest.TestCase):
                 with patch("emerald3ds_builder.build.load_rom", return_value=rom), \
                      patch("emerald3ds_builder.build.build_tree"), \
                      patch("emerald3ds_builder.build.run_generators", return_value={"voxel/regions.bin": scene}) as generate:
-                    result = json.loads(android_builder.build(str(rom.source), str(folder / "payload"),
-                        str(folder / "result.pak"), recipe.engine_abi, progress, str(cache)))
-                self.assertTrue(result["ok"])
+                    build_pack(rom.source, Payload(folder / "payload", platform="thor"), folder / "result.pak",
+                               generated_cache=cache, follower_fetcher=False)
                 self.assertEqual(generate.called, regenerate)
                 with pak.PakReader(folder / "result.pak") as reader:
                     self.assertEqual(reader.read("voxel/regions.bin"), scene)
+
+    def test_fresh_android_setup_uses_bundled_scenery_after_rom_validation(self):
+        for state in ("valid", "corrupt", "missing", "wrong_rom"):
+            with self.subTest(state=state), tempfile.TemporaryDirectory() as temp:
+                folder = Path(temp)
+                recipe, data = self.recipe(folder)
+                scene = b"prebuilt scenery"
+                recipe.generated = [{"path": "voxel/regions.bin", "size": len(scene), "crc": zlib.crc32(scene)}]
+                recipe.engine_abi = pak.engine_abi([("data/test.bin", len(data), zlib.crc32(data)),
+                                                   ("voxel/regions.bin", len(scene), zlib.crc32(scene))])
+                recipe.save(folder / "payload/android/emerald3ds.recipe")
+                source = folder / "payload/scenery/voxel/regions.bin"
+                source.parent.mkdir(parents=True)
+                if state != "missing": source.write_bytes(b"bad" if state == "corrupt" else scene)
+                rom = Rom(data, "11" * 20 if state == "wrong_rom" else recipe.rom_sha1,
+                          "test", "BPEE", folder / "test.gba")
+                output = folder / "result.pak"
+                output.write_bytes(b"previous pack")
+                progress = Progress()
+                with patch("emerald3ds_builder.build.load_rom", return_value=rom), \
+                     patch("emerald3ds_builder.build.build_tree", side_effect=AssertionError("tree generation")), \
+                     patch("emerald3ds_builder.build.run_generators", side_effect=AssertionError("scenery generation")):
+                    result = json.loads(android_builder.build(str(rom.source), str(folder / "payload"),
+                        str(output), recipe.engine_abi, progress))
+                self.assertEqual(result["ok"], state == "valid")
+                if state == "valid":
+                    with pak.PakReader(output) as reader:
+                        reader.verify()
+                        self.assertEqual(reader.read("voxel/regions.bin"), scene)
+                    self.assertIn("Installing prebuilt scenery", [message for _, message in progress.values])
+                else:
+                    self.assertEqual(output.read_bytes(), b"previous pack")
+                    self.assertIn("no game data" if state == "wrong_rom" else "prebuilt scenery", result["message"])

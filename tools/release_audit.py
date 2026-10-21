@@ -19,7 +19,8 @@ What fails the audit:
 * anything that looks like a GBA ROM (header, logo) or a Emerald 3DS data pack;
 * third_party/ directories without a licence and a provenance entry;
 * any pattern of the local denylist (`.public-denylist`, never versioned);
-* with --rom: any file that contains a run of the ROM's own bytes;
+* with --rom: any file that contains a run of the ROM's own bytes, except the
+  five explicitly approved, recipe-verified scenery outputs in Thor APKs;
 * with --web-payload: a web payload whose web-manifest.json is missing or
   invalid, whose files differ from the manifest's hashes, or that holds files
   outside payload/, python/ and licenses/.
@@ -200,7 +201,7 @@ def apk_files(data: bytes, name: str) -> list[tuple[str, callable]]:
 
 
 def audit(entries, allow: Allow, denylist, rom_index: RomIndex | None,
-          context: str) -> list[Finding]:
+          context: str, approved_scenery=frozenset()) -> list[Finding]:
     findings: list[Finding] = []
     third_party_dirs: set[str] = set()
     names = {name for name, _ in entries}
@@ -248,7 +249,20 @@ def audit(entries, allow: Allow, denylist, rom_index: RomIndex | None,
                     findings.append(Finding(name, "apk-engine-missing"))
                 if any(p.startswith("lib/") and not p.startswith("lib/armeabi-v7a/") for p in names_in_apk):
                     findings.append(Finding(name, "apk-unsupported-abi"))
-                findings.extend(audit(nested, allow, denylist, rom_index, "apk"))
+                scenery = set()
+                if any(p.startswith("assets/rombuilder/payload/scenery/") for p in names_in_apk):
+                    # Explicit Thor policy: only the five recipe-verified scenery
+                    # outputs may contain game-derived bytes. No ROM or pack is
+                    # exempted, and other APK members retain the ordinary scan.
+                    try:
+                        from verify_android_builder import Recipe, verify_scenery
+                        from emerald3ds_builder.recipe import RecipeError
+                        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                            recipe = Recipe.from_bytes(archive.read("assets/rombuilder/payload/android/emerald3ds.recipe"))
+                            scenery = {name + "!/" + p for p in verify_scenery(archive, recipe)}
+                    except (KeyError, ValueError, OSError, RecipeError) as exc:
+                        findings.append(Finding(name, "apk-scenery-invalid", str(exc)))
+                findings.extend(audit(nested, allow, denylist, rom_index, "apk", scenery))
                 decoded_archive = True
             except (zipfile.BadZipFile, RuntimeError, OSError) as exc:
                 findings.append(Finding(name, "apk-invalid", str(exc)))
@@ -267,7 +281,7 @@ def audit(entries, allow: Allow, denylist, rom_index: RomIndex | None,
         # size, its strings and its generic constant tables are not ours to
         # judge; the checks for a ROM, a data pack or a secret still apply.
         runtime = allow.matches(allow.runtime, name)
-        if len(data) > MAX_BYTES and not allow.matches(allow.large, name) and not runtime:
+        if len(data) > MAX_BYTES and not allow.matches(allow.large, name) and not runtime and name not in approved_scenery:
             findings.append(Finding(name, "too-large", "%d bytes" % len(data)))
         if suffix in MEDIA_SUFFIXES and context == "repo" and not allow.matches(allow.media, name):
             findings.append(Finding(name, "media-without-provenance"))
@@ -294,7 +308,7 @@ def audit(entries, allow: Allow, denylist, rom_index: RomIndex | None,
                 break
         # Inspect each decoded member rather than counting incidental matches
         # across the compressed container and all its unrelated vendor libraries.
-        if rom_index is not None and not decoded_archive:
+        if rom_index is not None and not decoded_archive and name not in approved_scenery:
             scanned = data
             if data[:8] == b"EM3DRCP1":
                 # A recipe: scan what it would reveal, not its LZMA stream.
@@ -356,7 +370,7 @@ def main(argv: list[str] | None = None) -> int:
     target = ap.add_mutually_exclusive_group(required=True)
     target.add_argument("--repo", type=Path, help="repository or export directory")
     target.add_argument("--zip", type=Path, help="release archive")
-    target.add_argument("--apk", type=Path, help="engine-only Thor APK, including its uncompressed contents")
+    target.add_argument("--apk", type=Path, help="Thor APK, including its uncompressed contents and verified scenery")
     ap.add_argument("--strict", action="store_true", help="exit 1 on any finding")
     ap.add_argument("--allow", type=Path, default=None, help="allowlist (TOML)")
     ap.add_argument("--denylist", type=Path, default=None, help="local denylist")

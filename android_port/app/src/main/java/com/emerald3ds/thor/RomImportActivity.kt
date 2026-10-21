@@ -33,7 +33,7 @@ class RomImportActivity : Activity() {
         }
         layout.addView(TextView(this).apply { text = "Set up Emerald"; textSize = 26f })
         message = TextView(this).apply {
-            text = "Choose your clean Emerald ROM. This device will prepare the game data. Your save and settings are kept."
+            text = "Choose your clean Emerald ROM to set up the game. The 3D scenery is already included. Your save and settings are kept."
             textSize = 18f; gravity = Gravity.CENTER; setPadding(0, 20, 0, 20)
         }
         layout.addView(message)

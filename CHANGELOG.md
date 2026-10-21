@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.4 — 2026-10-21 (Thor test build)
+
+- Bundle all five prebuilt scenery outputs in the APK, including voxel
+  buildings, terrain, regions, signposts and the intro scene. Fresh setup
+  validates the player's supported Emerald ROM and extracts the remaining
+  game data without running the scenery generators.
+- Verify every bundled scenery file against the APK's matching recipe before
+  packaging, after packaging and during setup. Damaged or incompatible scenery
+  fails before replacing existing data. Saves and settings are preserved.
+- Release auditing explicitly permits only these five verified game-derived
+  outputs inside Thor APKs; full ROMs, complete packs and other copied assets
+  remain excluded from release artifacts.
+
 ## 0.4.3 — 2026-10-20 (Thor test build)
 
 - Fix native startup failing after successful ROM setup on Windows-built APKs.

@@ -54,6 +54,9 @@ object RomBuilder {
             copyAssets(context, "rombuilder", work.resolve("builder"))
             val manifest = JSONObject(work.resolve("builder/manifest.json").readText())
             check(manifest.getLong("abi") == abi) { "This APK's ROM builder does not match its engine." }
+            check(manifest.optInt("schema") == 2 && manifest.optBoolean("prebuilt_scenery")) {
+                "This APK is missing its prebuilt scenery. Install the complete APK again."
+            }
             if (!Python.isStarted()) Python.start(AndroidPlatform(context.applicationContext))
             val built = work.resolve("generated.pak")
             val result = JSONObject(Python.getInstance().getModule("android_builder").callAttr("build",

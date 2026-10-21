@@ -24,7 +24,8 @@ def build(rom_path, payload_path, output_path, expected_abi, callback, cache_pac
     try:
         result = build_pack(Path(rom_path), payload, Path(output_path), progress=progress,
                             runner="inprocess", follower_fetcher=False,
-                            generated_cache=Path(cache_pack) if cache_pack else None)
+                            generated_cache=Path(cache_pack) if cache_pack else None,
+                            generated_assets=payload.shared / "scenery")
         return json.dumps({"ok": True, "release": result["release"]})
     except BuilderError as exc:
         return json.dumps({"ok": False, "message": exc.message, "hint": exc.hint})

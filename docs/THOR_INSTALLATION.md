@@ -13,8 +13,9 @@ available on this target.
    version, setup opens automatically.
 3. Tap **Choose Emerald ROM** and select your own clean **English Emerald
    (BPEE)** `.gba` file, or a ZIP containing it, from Android's file picker.
-4. Wait while the Thor prepares the game data. The APK includes the builder,
-   runtime, scenery generators and its matching reconstruction recipe. This
+4. Wait while the Thor prepares the game data. The APK includes prebuilt 3D
+   scenery and its matching reconstruction recipe. Setup validates your ROM,
+   extracts the remaining game data and installs a verified pack. This
    works offline and does not require a computer, another app or a downloaded
    `.pak` file. The game starts after verification and installation finish.
 
@@ -25,10 +26,10 @@ file moved or access expired, choose it again.
 
 An interrupted, cancelled or failed build keeps the previous pack, save and
 settings. The new pack is fully verified before replacing the old one.
-The first build includes scenery generation and can take several minutes;
-keep the setup screen open until it finishes.
-Updates reuse scenery from the previous pack when every generated file still
-matches the new release, so those updates avoid repeating the scenery build.
+Fresh setup and updates use the APK's verified prebuilt scenery and skip the
+scenery generation step. Keep the setup screen open until installation finishes.
+The APK contains game-derived scenery, including textures; the complete ROM
+and a ready-to-play game pack are not bundled. A supported ROM remains required.
 
 **Back → Choose Emerald ROM** starts setup manually. **Import data pack
 (advanced)** still accepts a prebuilt pack, checks it against the installed
