@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.3 — 2026-10-20 (Thor test build)
+
+- Fix native startup failing after successful ROM setup on Windows-built APKs.
+  The engine's boot marker now always uses the LF bytes required by native
+  startup, regardless of checkout line endings. APK verification rejects an
+  invalid marker before publication.
+- The corrected package was installed over 0.4.2 on an AYN Thor and reached
+  the game intro. Its existing on-device-generated pack was byte-identical
+  before and after the update; no scenery rebuild was needed.
+
 ## 0.4.2 — 2026-10-20 (Thor test build)
 
 - Install the APK over the existing app and choose your clean English Emerald

@@ -14,10 +14,32 @@ sys.path[:0] = [str(ROOT / "tools"), str(ROOT / "builder")]
 import release_audit
 import stage_android_builder
 import thor_dev
+import verify_android_builder
+from port_common import staging
 from emerald3ds_builder.recipe import Recipe
 
 
 class AndroidReleaseTests(unittest.TestCase):
+    def test_windows_engine_marker_is_canonical_and_native_compatible(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            source = folder / "source"
+            source.mkdir()
+            (source / "boot.txt").write_bytes(b"Emerald3DS RomFS v1\r\n")
+            output = folder / "engine"
+            staging.cmd_engine(argparse.Namespace(romfs=source, out=output))
+            self.assertEqual((output / "boot.txt").read_bytes(), b"Emerald3DS RomFS v1\n")
+            # This is the exact native CtrFs_Init fgets/strcmp contract.
+            with (output / "boot.txt").open("rb") as marker:
+                self.assertEqual(marker.readline(), staging.BOOT_MARKER)
+
+    def test_apk_verification_rejects_crlf_boot_marker(self):
+        with tempfile.TemporaryDirectory() as temp:
+            apk = Path(temp) / "bad.apk"
+            apk.write_bytes(self.archive({"assets/romfs/boot.txt": b"Emerald3DS RomFS v1\r\n"}))
+            with self.assertRaisesRegex(ValueError, "boot marker"):
+                verify_android_builder.verify(apk)
+
     def test_mismatched_recipe_cannot_be_staged(self):
         with tempfile.TemporaryDirectory() as temp:
             folder = Path(temp)

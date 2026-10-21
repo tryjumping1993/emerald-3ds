@@ -1,5 +1,24 @@
 # Thor verification
 
+## Native startup packaging fix — 2026-10-20
+
+On the connected AYN Thor, the published 0.4.2 APK failed before loading game
+data: `CtrFs_Init` rejected `boot.txt` because the Windows checkout had
+converted its newline to CRLF. The native reader uses binary mode and expects
+`Emerald3DS RomFS v1\n` exactly. The generated pack was correct and matched
+the independently rebuilt release pack byte-for-byte.
+
+A signed packaging-only test update, preserving the released native library
+and reconstruction recipe, changed the marker to LF. The Thor then logged
+`RomFS boot marker PASS`, loaded the matching pack, initialized graphics/audio
+and the file save driver, and rendered the game intro. A second cold start
+also reached the intro. The pack SHA-256 remained unchanged. Temporary debug
+logging was removed after collecting the evidence.
+
+Engine staging now canonicalizes and validates the marker, Git pins its LF
+checkout, and APK validation rejects CRLF markers. Regression tests reproduce
+the Windows input and check the exact bytes read by native startup.
+
 ## On-device ROM builder — 2026-10-20
 
 No Thor was connected. Android runtime tests use an API 36 x86-64 emulator

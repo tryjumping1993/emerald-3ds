@@ -2,3 +2,4 @@
 *.patch text eol=lf
 *.sh text eol=lf
 gradlew text eol=lf
+3ds_port/romfs/boot.txt text eol=lf

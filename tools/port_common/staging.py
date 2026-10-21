@@ -63,6 +63,7 @@ OPTIONAL_PATTERNS = [
     "followers/*",
 ]
 SUPPORTED_ROM_SHA1 = bytes.fromhex("f3ae088181bf583e55daf962a92bb46f4f1d07b7")
+BOOT_MARKER = b"Emerald3DS RomFS v1\n"
 
 
 def is_engine(rel: str) -> bool:
@@ -122,7 +123,14 @@ def cmd_engine(args) -> None:
             continue
         dst = args.out / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, dst)
+        if rel == "boot.txt":
+            # Native startup reads in binary mode and requires this exact line.
+            # Windows checkouts must never ship CRLF into the Android RomFS.
+            if path.read_bytes().replace(b"\r\n", b"\n") != BOOT_MARKER:
+                raise ValueError("Invalid RomFS boot marker")
+            dst.write_bytes(BOOT_MARKER)
+        else:
+            shutil.copy2(path, dst)
     print("staging: engine RomFS -> %s" % args.out)
 
 

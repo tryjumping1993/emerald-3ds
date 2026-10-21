@@ -12,10 +12,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "builder"))
 from emerald3ds_builder.recipe import Recipe
 from emerald3ds_builder.voxel import STEPS
+from port_common.staging import BOOT_MARKER
 
 
 def verify(apk):
     with zipfile.ZipFile(apk) as archive:
+        if archive.read("assets/romfs/boot.txt") != BOOT_MARKER:
+            raise ValueError("APK RomFS boot marker is invalid (must use LF line endings)")
         abi = struct.unpack("<I", archive.read("assets/romfs/engine/abi.bin"))[0]
         manifest = json.loads(archive.read("assets/rombuilder/manifest.json"))
         recipe = Recipe.from_bytes(archive.read("assets/rombuilder/payload/android/emerald3ds.recipe"))
